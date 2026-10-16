@@ -1,9 +1,10 @@
 import { api, disposeCharts, esc, state } from "./lib.js";
 import overview from "./views/overview.js";
 import product from "./views/product.js";
+import reports from "./views/reports.js";
 import scenario from "./views/scenario.js";
 
-const routes = { overview, product, scenario };
+const routes = { overview, product, scenario, reports };
 const main = document.getElementById("view");
 const picker = document.getElementById("snapshot");
 
