@@ -25,11 +25,14 @@ async function render() {
       <pre>python -m atlas.ingest data/raw/BACI_HS12_V202601.zip</pre></div>`;
     return;
   }
+  section.setAttribute("aria-busy", "true");
   try {
     await snapshotDetail();
     await view(section, rest, new URLSearchParams(search));
   } catch (error) {
     section.innerHTML = `<p class="error">${esc(error.message)}</p>`;
+  } finally {
+    section.removeAttribute("aria-busy");
   }
 }
 
