@@ -62,9 +62,9 @@ export default async function seaRoutes(root, _, params) {
       map: "world",
       silent: true,
       left: 0, right: 0, top: 0, bottom: 0,
-      itemStyle: { areaColor: css("--tint"), borderColor: css("--line") },
+      itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
       regions: [
-        ...selected.countries.map((c) => ({ name: shapeId(c.countryCode), itemStyle: { areaColor: css("--accent-2") } })),
+        ...selected.countries.map((c) => ({ name: shapeId(c.countryCode), itemStyle: { areaColor: css("--supply-soft") } })),
         { name: TUNISIA, itemStyle: { areaColor: css("--warn") } },
       ],
     },
@@ -83,7 +83,7 @@ export default async function seaRoutes(root, _, params) {
           lineStyle: {
             width: 1.5 + 9 * (r.valueUsd / widest),
             color: selected.id === r.id || selected.routes?.includes(r.id) ? css("--warn") : css("--accent"),
-            opacity: 0.55,
+            opacity: 0.8,
           },
         })),
       },

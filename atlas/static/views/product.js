@@ -117,7 +117,7 @@ export default async function product(root, [code], params) {
         itemHeight: 120,
         text: [pct(ranked[0].share, 0), pct(0, 0)],
         textStyle: { color: css("--muted") },
-        inRange: { color: [css("--accent-soft"), css("--accent")] },
+        inRange: { color: [css("--supply-soft"), css("--supply")] },
       },
       series: [{
         type: "map",
@@ -127,8 +127,8 @@ export default async function product(root, [code], params) {
         right: 0,
         top: 0,
         bottom: 34,
-        itemStyle: { areaColor: css("--tint"), borderColor: css("--line") },
-        emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent-2") } },
+        itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
+        emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent") } },
         data: [
           ...ranked.map((s) => ({ name: shapeId(s.countryCode), value: s.share, supplier: s })),
           { name: TUNISIA, itemStyle: { areaColor: css("--warn") }, emphasis: { disabled: true } },

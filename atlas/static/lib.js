@@ -128,6 +128,8 @@ export function zoomable(instance, component) {
   zoomOut.addEventListener("click", () => zoom(1 / 1.5));
   reset.addEventListener("click", () => at({ zoom: 1, center: null }));
   at({ roam: true, scaleLimit: { min: 1, max: 8 } });
+  // The map moves at once on roam, so animated series would trail behind it.
+  instance.setOption({ animationDurationUpdate: 0 });
   instance.getDom().append(controls);
   return instance;
 }
