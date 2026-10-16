@@ -160,5 +160,5 @@ flowchart LR
     Browser[Browser<br>ECharts, Tabulator] -->|HTTP| App
 ```
 
-The archive is mounted read-only at `/data/raw` inside the app container
+The archive is mounted read-only at `/app/data/raw` inside the app container
 and never enters git or the image.
