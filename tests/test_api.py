@@ -138,3 +138,8 @@ def test_report_csv_exports_the_result_table(api):
 def test_unknown_report_is_not_found(api):
     assert api.get("/api/reports/not-an-id").status_code == 404
     assert api.get("/api/reports/0123456789abcdef01234567").status_code == 404
+
+
+def test_static_files_are_revalidated(api):
+    assert api.get("/").headers["cache-control"] == "no-cache"
+    assert api.get("/app.js").headers["cache-control"] == "no-cache"

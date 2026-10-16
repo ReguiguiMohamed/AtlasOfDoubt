@@ -277,5 +277,13 @@ def get_report(db: Db, report_id: str):
     return find_report(db, report_id)
 
 
+class RevalidatedFiles(StaticFiles):
+    # With no Cache-Control browsers cache by heuristic, and after a deploy one page can load new and stale modules together.
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Mounted last so every /api route above wins over the static catch-all.
-app.mount("/", StaticFiles(directory=FilePath(__file__).parent / "static", html=True), name="static")
+app.mount("/", RevalidatedFiles(directory=FilePath(__file__).parent / "static", html=True), name="static")
