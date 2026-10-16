@@ -42,17 +42,18 @@ the snapshot's source and archive hash at save time.
 
 | Route | View |
 | --- | --- |
-| `#/overview?year&minValue` | every product of a year with its concentration, and the "Choice or structure?" quadrant of Tunisian against world HHI |
-| `#/product/{code}?year` | one product, heading or chapter: supplier bars and table, imports and HHI from 2012 to 2024, supplier shares over time |
+| `#/overview?year&minValue` | every product of a year with its concentration, the "Choice or structure?" quadrant of Tunisian against world HHI and the products whose HHI rose or fell the most since an earlier year |
+| `#/country` and `#/country/{code}?year` | every supplier country, then one country: what it sent each year, the products it supplies and its rank among their suppliers |
+| `#/product/{code}?year` | one product, heading or chapter: supplier bars and table, imports and HHI from 2012 to 2024, supplier shares over time, and for one product the largest world exporters against what each sent Tunisia |
 | `#/scenario?mode&code&year&suppliers&reduction` | product or supplier-country disruption, previewed live, saved as a report |
-| `#/reports` and `#/reports/{id}` | saved reports with provenance, limitations and CSV download |
+| `#/reports` and `#/reports/{id}` | saved reports with provenance, limitations, CSV download and a print layout that keeps every table row |
 
 Each view renders into a fresh section, so a slow request from a view the
 reader already left writes into a detached node instead of the current page.
 
 ## Tests
 
-`pytest -q` runs 42 tests in about 8 seconds against a local MongoDB on port
+`pytest -q` runs 49 tests in about 11 seconds against a local MongoDB on port
 27017. CI starts a MongoDB 9.0 service for them.
 
 | Guarantee | Tests |
@@ -64,4 +65,5 @@ reader already left writes into a detached node instead of the current page.
 | Codes keep leading zeros, values convert exactly, missing tonnes stay null | `test_ingest.py::test_leading_zeros_survive`, `::test_values_are_converted_from_thousands_of_usd_exactly`, `::test_missing_quantity_stays_missing` |
 | Bad rows go to the error report | `test_ingest.py::test_untrusted_rows_go_to_the_error_report` |
 | Re-import is idempotent, a missing year fails the snapshot | `test_ingest.py::test_importing_twice_creates_no_duplicates`, `::test_missing_year_fails_the_snapshot` |
+| Shifts count only products over the minimum value in both years | `test_api.py::test_movers_need_the_minimum_value_in_both_years` |
 | Reports ignore browser numbers and survive a new snapshot | `test_api.py::test_report_ignores_numbers_sent_by_the_browser`, `::test_report_is_unchanged_after_another_snapshot_is_added` |
