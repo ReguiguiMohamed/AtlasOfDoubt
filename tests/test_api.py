@@ -147,3 +147,27 @@ def test_static_files_are_revalidated(api):
 
 def test_responses_are_compressed(api):
     assert api.get("/app.js", headers={"accept-encoding": "gzip"}).headers["content-encoding"] == "gzip"
+
+
+def test_country_profile_sums_supplies_across_products(api):
+    profile = api.get("/api/countries/251", params={"snapshot": SNAPSHOT, "year": 2012}).json()
+    assert profile["country"]["countryName"] == "France"
+    assert [(p["productCode"], p["valueUsd"], p["share"], p["rank"]) for p in profile["products"]] == [
+        ("010121", 60000, 0.6, 1),
+        ("310230", 2734, 1, 1),
+    ]
+    years = {y["year"]: y for y in profile["years"]}
+    assert years[2012]["valueUsd"] == 62734
+    assert years[2012]["shareOfImports"] == pytest.approx(62734 / 102734)
+    assert years[2012]["productCount"] == 2
+    assert years[2013]["valueUsd"] is None
+    assert years[2015]["shareOfImports"] == 1
+
+
+def test_country_profile_ranks_a_minor_supplier(api):
+    [horses] = api.get("/api/countries/380", params={"snapshot": SNAPSHOT, "year": 2012}).json()["products"]
+    assert (horses["rank"], horses["share"], horses["supplierCount"]) == (2, 0.3, 3)
+
+
+def test_unknown_country_is_not_found(api):
+    assert api.get("/api/countries/999", params={"snapshot": SNAPSHOT}).status_code == 404

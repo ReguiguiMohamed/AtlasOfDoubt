@@ -144,6 +144,60 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId):
     return {"snapshot": snapshot_id, "code": code, "products": products, "years": years}
 
 
+@app.get("/api/countries/{country_code}")
+def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, year: int | None = None):
+    """What one supplier country sends Tunisia: a yearly trend and the products of one year.
+
+    Rank is one plus the number of suppliers that sent more, so equal values share a rank.
+    """
+    snapshot = ready_snapshot(db, snapshot_id)
+    year = checked_year(snapshot, year)
+    country = next((c for c in snapshot["countries"] if c["countryCode"] == country_code), None)
+    if not country:
+        raise HTTPException(404, f"no country {country_code} in {snapshot_id}")
+
+    own = {"$first": {"$filter": {"input": "$suppliers", "cond": {"$eq": ["$$this.countryCode", country_code]}}}}
+    imports = db.product_years.aggregate([
+        {"$match": {"snapshotId": snapshot_id}},
+        {"$group": {"_id": "$year", "totalUsd": {"$sum": "$metrics.totalUsd"}}},
+    ])
+    totals = {r["_id"]: r["totalUsd"] for r in imports}
+    supplied = db.product_years.aggregate([
+        {"$match": {"snapshotId": snapshot_id, "suppliers.countryCode": country_code}},
+        {"$project": {"year": 1, "own": own}},
+        {"$group": {"_id": "$year", "valueUsd": {"$sum": "$own.valueUsd"}, "productCount": {"$sum": 1}}},
+    ])
+    by_year = {r["_id"]: r for r in supplied}
+    years = []
+    for y in snapshot["years"]:
+        row = by_year.get(y)
+        years.append({
+            "year": y,
+            "valueUsd": row["valueUsd"] if row else None,
+            "shareOfImports": row["valueUsd"] / totals[y] if row else None,
+            "productCount": row["productCount"] if row else 0,
+        })
+
+    # Ranking inside the database sends one small row per product instead of every supplier list.
+    rows = db.product_years.aggregate([
+        {"$match": {"snapshotId": snapshot_id, "year": year, "suppliers.countryCode": country_code}},
+        {"$project": {"productCode": 1, "description": 1, "metrics": 1, "values": "$suppliers.valueUsd", "own": own}},
+        {"$project": {
+            "_id": 0,
+            "productCode": 1,
+            "description": 1,
+            "valueUsd": "$own.valueUsd",
+            "rank": {"$add": [1, {"$size": {"$filter": {"input": "$values", "cond": {"$gt": ["$$this", "$own.valueUsd"]}}}}]},
+            "supplierCount": {"$size": "$values"},
+            "totalUsd": "$metrics.totalUsd",
+            "hhi": "$metrics.hhi",
+        }},
+        {"$sort": {"valueUsd": -1}},
+    ])
+    products = [{**r, "share": r["valueUsd"] / r["totalUsd"]} for r in rows]
+    return {"snapshot": snapshot_id, "year": year, "country": country, "years": years, "products": products}
+
+
 LIMITATIONS = [
     "Values are nominal current US dollars as published in BACI, with no inflation adjustment.",
     "The affected value is historical import value exposed under this scenario. It is not a forecast of losses.",

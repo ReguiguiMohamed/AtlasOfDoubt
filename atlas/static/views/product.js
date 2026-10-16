@@ -99,7 +99,8 @@ export default async function product(root, [code], params) {
   if (rest.length) {
     shown.push({ countryName: t("{count} others", { count: rest.length }), valueUsd: rest.reduce((a, s) => a + s.valueUsd, 0), share: rest.reduce((a, s) => a + s.share, 0) });
   }
-  chart(root.querySelector("#bars"), {
+  const profile = (countryCode) => countryCode && (location.hash = `#/country/${countryCode}?year=${current.year}`);
+  const bars = chart(root.querySelector("#bars"), {
     grid: { left: 140, right: 70, top: 10, bottom: 30 },
     tooltip: { formatter: (p) => `${esc(p.name)}: ${usd(p.value)} (${pct(shown[p.dataIndex].share)})` },
     xAxis: { ...axis(), type: "value", axisLabel: { color: css("--muted"), formatter: usd } },
@@ -111,8 +112,9 @@ export default async function product(root, [code], params) {
       label: { show: true, position: "right", color: css("--muted"), formatter: (p) => pct(shown[p.dataIndex].share) },
     }],
   });
+  bars.on("click", (p) => profile(shown[p.dataIndex].countryCode));
 
-  table(root.querySelector("#suppliers"), {
+  const suppliers = table(root.querySelector("#suppliers"), {
     data: ranked,
     paginationSize: 12,
     columns: [
@@ -123,6 +125,7 @@ export default async function product(root, [code], params) {
       ...(single ? [tonsColumn(t("Tonnes"), "quantityTonnes")] : []),
     ],
   });
+  suppliers.on("rowClick", (_, row) => profile(row.getData().countryCode));
 
   const where = root.querySelector("#where");
   loadWorld()
@@ -155,7 +158,7 @@ export default async function product(root, [code], params) {
           { name: TUNISIA, itemStyle: { areaColor: css("--warn") }, emphasis: { disabled: true } },
         ],
       }],
-    }))
+    }).on("click", (p) => profile(p.data?.supplier?.countryCode)))
     .catch(() => where.remove());
 
   const years = data.years.map((y) => String(y.year));

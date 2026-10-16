@@ -81,6 +81,26 @@ const FR = {
   "Matches": "Résultats",
   "Type at least two characters": "Saisissez au moins deux caractères",
 
+  "Countries": "Pays",
+  "Pick a country to see what it sends Tunisia, how much of Tunisia's imports it carries, and the products where it leads.":
+    "Choisissez un pays pour voir ce qu'il fournit à la Tunisie, quelle part des importations tunisiennes il assure et les produits où il est en tête.",
+  // French elides "de" before a vowel, so these sentences name the country without a preposition.
+  "BACI records no exports from {name} to Tunisia between {from} and {to}.":
+    "{name} : BACI n'enregistre aucune exportation vers la Tunisie entre {from} et {to}.",
+  "Everything Tunisia imported from {name}, product by product. Share and rank are measured among each product's suppliers.":
+    "Tout ce que la Tunisie a importé de ce pays, produit par produit. La part et le rang se mesurent parmi les fournisseurs de chaque produit.",
+  "Simulate losing this supplier": "Simuler la perte de ce fournisseur",
+  "Supplied to Tunisia": "Fourni à la Tunisie",
+  "Products": "Produits",
+  "Products it leads": "Produits où il est en tête",
+  "{count} as sole supplier": "{count} comme fournisseur unique",
+  "Supplies to Tunisia, {from} to {to}": "Livraisons à la Tunisie, de {from} à {to}",
+  "Products from {name}, {year}": "{name} : produits fournis en {year}",
+  "Sort by share to find the products where Tunisia depends most on {name}.":
+    "Triez par part pour trouver les produits où la Tunisie dépend le plus de ce pays.",
+  "Supplied": "Fourni",
+  "Rank": "Rang",
+
   "Historical import value exposed under this scenario": "Valeur historique d'importation exposée dans ce scénario",
   "Disruption scenario": "Scénario de rupture",
   "Cut the imports from chosen suppliers by a percentage and see how much of Tunisia's historical import value sits behind them. Other suppliers are left as they were, with no replacement and no price response.":

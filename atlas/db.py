@@ -31,6 +31,7 @@ def connect():
     db = client.get_database(os.environ.get("ATLAS_DB", "atlas"), codec_options=CODEC_OPTIONS)
     db.product_years.create_index([("snapshotId", 1), ("productCode", 1), ("year", 1)], unique=True)
     db.product_years.create_index([("snapshotId", 1), ("year", 1)])
+    db.product_years.create_index([("snapshotId", 1), ("suppliers.countryCode", 1), ("year", 1)])
     db.products.create_index([("snapshotId", 1), ("productCode", 1)], unique=True)
     db.reports.create_index([("createdAt", -1)])
     return client, db
