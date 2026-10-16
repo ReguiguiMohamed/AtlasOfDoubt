@@ -161,7 +161,7 @@ dl.facts dd { margin: 0; word-break: break-word; }
   .top nav { order: 3; flex-basis: 100%; overflow-x: auto; gap: 1.1rem; }
   main { padding: 1.5rem 1rem 1rem; }
   h1 { font-size: 2rem; }
-  .grid { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
   .chart.tall { height: 380px; }
   .kpi + .kpi { padding-left: 0; border-left: 0; }
   .kpi { border-bottom: 1px solid var(--line); padding-right: 0; }
