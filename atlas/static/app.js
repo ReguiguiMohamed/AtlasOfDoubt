@@ -1,7 +1,8 @@
 import { api, disposeCharts, esc, state } from "./lib.js";
 import overview from "./views/overview.js";
+import product from "./views/product.js";
 
-const routes = { overview };
+const routes = { overview, product };
 const main = document.getElementById("view");
 const picker = document.getElementById("snapshot");
 
