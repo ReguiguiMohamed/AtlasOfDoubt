@@ -90,11 +90,24 @@ def scenario(suppliers, selected, reduction):
     ]
     baseline = total(suppliers)
     affected = reduction * total(s for s in suppliers if s["countryCode"] in selected)
+    after = {s["countryCode"]: s for s in with_shares(remaining)}
     return {
         "baseline": summarize(suppliers),
         "affectedUsd": affected,
         "exposureShare": affected / baseline if baseline else None,
         "remainingUsd": baseline - affected,
         "remaining": summarize(remaining),
-        "remainingSuppliers": with_shares(remaining),
+        "suppliers": [
+            {
+                "countryCode": s["countryCode"],
+                "countryName": s["countryName"],
+                "isoCode": s.get("isoCode"),
+                "selected": s["countryCode"] in selected,
+                "baselineUsd": s["valueUsd"],
+                "baselineShare": s["share"],
+                "remainingUsd": after[s["countryCode"]]["valueUsd"],
+                "remainingShare": after[s["countryCode"]]["share"],
+            }
+            for s in with_shares(suppliers)
+        ],
     }

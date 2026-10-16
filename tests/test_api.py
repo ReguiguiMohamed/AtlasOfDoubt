@@ -64,3 +64,77 @@ def test_history_of_a_group_sums_suppliers_before_shares(api):
 
 def test_history_rejects_odd_length_codes(api):
     assert api.get("/api/products/100/history", params={"snapshot": SNAPSHOT}).status_code == 422
+
+
+def preview(api, **spec):
+    response = api.post("/api/scenarios/preview", json={"snapshot": SNAPSHOT, "year": 2012, **spec})
+    assert response.status_code == 200, response.text
+    return response.json()["result"]
+
+
+def test_product_scenario_follows_the_blueprint_rule(api):
+    result = preview(api, mode="product", productCode="010121", suppliers=[251], reduction=0.5)
+    assert result["affectedUsd"] == 30000
+    assert result["exposureShare"] == pytest.approx(0.3)
+    assert result["remainingUsd"] == 70000
+    assert [s["selected"] for s in result["suppliers"]] == [True, False, False]
+
+
+def test_country_scenario_ranks_products_and_never_adds_tonnes(api):
+    result = preview(api, mode="country", suppliers=[251], reduction=1)
+    assert [p["productCode"] for p in result["products"]] == ["010121", "310230"]
+    assert result["affectedUsd"] == 60000 + 2734
+    assert result["totalImportsUsd"] == 100000 + 2734
+    assert result["suppliers"] == [{"countryCode": 251, "countryName": "France", "valueUsd": 62734}]
+    assert "quantityTonnes" not in str(result)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"mode": "product", "suppliers": [251], "reduction": 0.5},
+        {"mode": "product", "productCode": "010121", "suppliers": [251], "reduction": 1.5},
+        {"mode": "country", "suppliers": [], "reduction": 0.5},
+        {"mode": "country", "suppliers": [999], "reduction": 0.5},
+    ],
+)
+def test_scenario_rejects_bad_specs(api, spec):
+    response = api.post("/api/scenarios/preview", json={"snapshot": SNAPSHOT, "year": 2012, **spec})
+    assert response.status_code == 422
+
+
+def test_report_ignores_numbers_sent_by_the_browser(api):
+    body = {"snapshot": SNAPSHOT, "year": 2012, "mode": "product", "productCode": "010121",
+            "suppliers": [251], "reduction": 0.5, "title": "France halves", "affectedUsd": 1}
+    report_id = api.post("/api/reports", json=body).json()["id"]
+    report = api.get(f"/api/reports/{report_id}").json()
+    assert report["result"]["affectedUsd"] == 30000
+    assert report["snapshot"]["archive"]["filename"] == "BACI_HS12_V202601.zip"
+    assert report["calculationVersion"] == "1"
+
+
+def test_report_is_unchanged_after_another_snapshot_is_added(api, db, make_archive):
+    body = {"snapshot": SNAPSHOT, "year": 2012, "mode": "country", "suppliers": [251, 380],
+            "reduction": 0.25, "title": "EU quarter cut"}
+    report_id = api.post("/api/reports", json=body).json()["id"]
+    before = api.get(f"/api/reports/{report_id}").json()
+    ingest(make_archive({2012: ["2012,251,788,010121,999,1"]}, release="209901"), db)
+    assert len(api.get("/api/snapshots").json()) == 2
+    assert api.get(f"/api/reports/{report_id}").json() == before
+
+
+def test_report_csv_exports_the_result_table(api):
+    body = {"snapshot": SNAPSHOT, "year": 2012, "mode": "product", "productCode": "010121",
+            "suppliers": [251], "reduction": 0.5, "title": "France halves"}
+    report_id = api.post("/api/reports", json=body).json()["id"]
+    response = api.get(f"/api/reports/{report_id}.csv")
+    lines = response.text.splitlines()
+    assert response.headers["content-type"].startswith("text/csv")
+    assert lines[0] == "countryCode,countryName,isoCode,selected,baselineUsd,baselineShare,remainingUsd,remainingShare"
+    assert lines[1].startswith("251,France,FRA,True,60000,0.6,30000.0,")
+    assert len(lines) == 4
+
+
+def test_unknown_report_is_not_found(api):
+    assert api.get("/api/reports/not-an-id").status_code == 404
+    assert api.get("/api/reports/0123456789abcdef01234567").status_code == 404

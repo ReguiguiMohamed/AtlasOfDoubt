@@ -6,11 +6,17 @@ Every request names its snapshot, and every figure in a response is computed
 here from stored supplier values. Numbers sent by the browser are never used.
 """
 
+import csv
+import io
 import re
 from contextlib import asynccontextmanager
-from typing import Annotated
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
+from bson import ObjectId
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response
+from pydantic import BaseModel, Field
 from pymongo.database import Database
 
 from atlas import metrics
@@ -131,3 +137,139 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId):
             "world": docs[0]["world"] if len(code) == 6 else None,
         })
     return {"snapshot": snapshot_id, "code": code, "products": products, "years": years}
+
+
+LIMITATIONS = [
+    "Values are nominal current US dollars as published in BACI, with no inflation adjustment.",
+    "The affected value is historical import value exposed under this scenario. It is not a forecast of losses.",
+    "No replacement by other suppliers and no price response are assumed.",
+    "A missing flow means BACI recorded no positive flow. It is not a confirmed zero.",
+    "Tonnes are never added across different products.",
+]
+
+
+class ScenarioSpec(BaseModel):
+    snapshot: str
+    year: int
+    mode: Literal["product", "country"]
+    productCode: str | None = Field(None, pattern=CODE_PATTERN)
+    suppliers: list[int] = Field(min_length=1)
+    reduction: Decimal = Field(ge=0, le=1)
+
+
+class ReportRequest(ScenarioSpec):
+    title: str = Field(min_length=1, max_length=200)
+
+
+def run_scenario(db, snapshot, spec):
+    checked_year(snapshot, spec.year)
+    names = {c["countryCode"]: c["countryName"] for c in snapshot["countries"]}
+    unknown = set(spec.suppliers) - names.keys()
+    if unknown:
+        raise HTTPException(422, f"unknown country codes {sorted(unknown)}")
+    if spec.mode == "product":
+        if spec.productCode is None:
+            raise HTTPException(422, "product mode needs a productCode")
+        products = group_products(db, spec.snapshot, spec.productCode)
+        suppliers = combined_suppliers(spec.productCode, product_years(db, spec.snapshot, spec.productCode, spec.year))
+        return {
+            "description": products[0]["description"] if len(spec.productCode) == 6 else f"{len(products)} products",
+            **metrics.scenario(suppliers, spec.suppliers, spec.reduction),
+        }
+
+    selected = set(spec.suppliers)
+    rows, total_imports, supplier_totals = [], metrics.ZERO, dict.fromkeys(selected, metrics.ZERO)
+    docs = db.product_years.find(
+        {"snapshotId": spec.snapshot, "year": spec.year}, {"_id": 0, "productCode": 1, "description": 1, "suppliers": 1}
+    )
+    for doc in docs:
+        total_imports += metrics.total(doc["suppliers"])
+        hit = [s for s in doc["suppliers"] if s["countryCode"] in selected]
+        if not hit:
+            continue
+        for s in hit:
+            supplier_totals[s["countryCode"]] += s["valueUsd"]
+        result = metrics.scenario(doc["suppliers"], selected, spec.reduction)
+        rows.append({
+            "productCode": doc["productCode"],
+            "description": doc["description"],
+            "totalUsd": result["baseline"]["totalUsd"],
+            "affectedUsd": result["affectedUsd"],
+            "exposureShare": result["exposureShare"],
+            "baselineHhi": result["baseline"]["hhi"],
+            "remainingHhi": result["remaining"]["hhi"],
+        })
+    rows.sort(key=lambda r: r["affectedUsd"], reverse=True)
+    affected = sum((r["affectedUsd"] for r in rows), metrics.ZERO)
+    return {
+        "totalImportsUsd": total_imports,
+        "affectedUsd": affected,
+        "exposureShare": affected / total_imports if total_imports else None,
+        "suppliers": [
+            {"countryCode": code, "countryName": names[code], "valueUsd": value} for code, value in supplier_totals.items()
+        ],
+        "products": rows,
+    }
+
+
+@app.post("/api/scenarios/preview")
+def preview(db: Db, spec: ScenarioSpec):
+    result = run_scenario(db, ready_snapshot(db, spec.snapshot), spec)
+    return {"spec": spec.model_dump(), "calculationVersion": metrics.CALCULATION_VERSION, "result": result}
+
+
+@app.post("/api/reports", status_code=201)
+def create_report(db: Db, request: ReportRequest):
+    snapshot = ready_snapshot(db, request.snapshot)
+    result = run_scenario(db, snapshot, request)
+    report = {
+        "title": request.title,
+        "createdAt": datetime.now(timezone.utc),
+        "spec": request.model_dump(exclude={"title"}),
+        "snapshot": {"id": snapshot["_id"], "source": snapshot["source"], "archive": snapshot["archive"]},
+        "calculationVersion": metrics.CALCULATION_VERSION,
+        "limitations": LIMITATIONS,
+        "result": result,
+    }
+    return {"id": str(db.reports.insert_one(report).inserted_id)}
+
+
+def find_report(db, report_id):
+    report = db.reports.find_one({"_id": ObjectId(report_id)}) if ObjectId.is_valid(report_id) else None
+    if not report:
+        raise HTTPException(404, f"no report {report_id}")
+    return {**report, "_id": str(report["_id"])}
+
+
+@app.get("/api/reports")
+def list_reports(db: Db):
+    reports = db.reports.find({}, {"title": 1, "createdAt": 1, "spec": 1}).sort("createdAt", -1)
+    return [{**r, "_id": str(r["_id"])} for r in reports]
+
+
+CSV_COLUMNS = {
+    "product": ["countryCode", "countryName", "isoCode", "selected", "baselineUsd", "baselineShare", "remainingUsd", "remainingShare"],
+    "country": ["productCode", "description", "totalUsd", "affectedUsd", "exposureShare", "baselineHhi", "remainingHhi"],
+}
+
+
+@app.get("/api/reports/{report_id}.csv")
+def report_csv(db: Db, report_id: str):
+    """The report's result table. Provenance and limitations live in the report page."""
+    report = find_report(db, report_id)
+    mode = report["spec"]["mode"]
+    rows = report["result"]["suppliers" if mode == "product" else "products"]
+    out = io.StringIO()
+    writer = csv.DictWriter(out, CSV_COLUMNS[mode], extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        out.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="report-{report_id}.csv"'},
+    )
+
+
+@app.get("/api/reports/{report_id}")
+def get_report(db: Db, report_id: str):
+    return find_report(db, report_id)

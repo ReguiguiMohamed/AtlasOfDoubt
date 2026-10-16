@@ -18,6 +18,8 @@ def test_blueprint_example():
     assert result["exposureShare"] == Decimal("0.3")
     assert result["remainingUsd"] == Decimal(70_000_000)
     assert result["remaining"]["topSupplier"]["share"] == Decimal(30) / Decimal(70)
+    a = result["suppliers"][0]
+    assert (a["selected"], a["baselineShare"], a["remainingUsd"]) == (True, Decimal("0.6"), Decimal(30_000_000))
 
 
 def test_baseline_measures():
@@ -61,7 +63,7 @@ def test_full_disruption_of_all_suppliers():
     assert result["exposureShare"] == 1
     assert result["remainingUsd"] == 0
     assert result["remaining"]["hhi"] is None
-    assert all(s["share"] is None for s in result["remainingSuppliers"])
+    assert all(s["remainingShare"] is None for s in result["suppliers"])
 
 
 def test_absent_supplier_affects_nothing():
