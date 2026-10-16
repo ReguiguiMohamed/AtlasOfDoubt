@@ -8,6 +8,9 @@ const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 export default async function overview(root, _, params) {
   const minValue = Number(params.get("minValue") ?? 1_000_000);
   const data = await api(`/overview?${query({ snapshot: state.snapshot._id, year: params.get("year"), minValue })}`);
+  const earlier = state.snapshot.years.filter((y) => y < data.year);
+  const from = earlier.includes(Number(params.get("from"))) ? Number(params.get("from")) : earlier[0];
+  const moved = from && await api(`/movers?${query({ snapshot: state.snapshot._id, from, to: data.year, minValue })}`);
   const rows = data.rows.map((r) => ({
     code: r.productCode,
     description: r.description,
@@ -39,13 +42,20 @@ export default async function overview(root, _, params) {
       <p>${t("Tunisia's supplier concentration against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.", { year: data.year })}</p>
       <div class="chart tall" id="quadrant"></div>
     </div>
+    ${moved ? `<div class="panel">
+      <h2>${t("Biggest shifts in concentration, {from} to {to}", { from, to: data.year })}</h2>
+      <p>${t("Among the {count} products imported in both years at the minimum value or more, the ten whose supplier HHI rose the most and the ten where it fell the most. The hollow dot is {from}, the solid dot {to}, and red marks a rise.", { count: count(moved.compared), from, to: data.year })}</p>
+      <form class="controls"><label>${t("Compare with")} <select name="from">${earlier
+        .map((y) => `<option ${y === from ? "selected" : ""}>${y}</option>`).join("")}</select></label></form>
+      <div class="chart tall" id="movers"></div>
+    </div>` : ""}
     <div class="panel"><h2>${rows.length === 1 ? t("1 product") : t("{count} products", { count: count(rows.length) })}</h2><div id="products"></div></div>
   `));
 
   const form = root.querySelector("form");
   form.addEventListener("change", (event) => {
     if (event.target.name === "search") return;
-    location.hash = `#/overview?${query({ year: form.year.value, minValue: form.minValue.value })}`;
+    location.hash = `#/overview?${query({ year: form.year.value, minValue: form.minValue.value, from: params.get("from") })}`;
   });
 
   const grid = table(root.querySelector("#products"), {
@@ -104,4 +114,38 @@ export default async function overview(root, _, params) {
     }],
   });
   quadrant.on("click", (p) => (location.hash = `#/product/${p.data[3].code}?year=${data.year}`));
+
+  if (moved) movers(root, moved, params);
+}
+
+function movers(root, moved, params) {
+  root.querySelector("select[name=from]").addEventListener("change", (e) => {
+    params.set("from", e.target.value);
+    location.hash = `#/overview?${params}`;
+  });
+  const rows = [...moved.rising, ...moved.falling];
+  const label = (r) => `${r.productCode} ${r.description}`;
+  const supplier = (m) => (m.topSupplier ? `${esc(m.topSupplier.countryName)} ${pct(m.topSupplier.share)}` : t("n/a"));
+  const dot = (r, side) => ({ value: [r[side].hhi, label(r)], row: r });
+  const node = root.querySelector("#movers");
+  const plot = chart(node, {
+    grid: { left: Math.min(240, node.clientWidth * 0.4), right: 20, top: 10, bottom: 40 },
+    tooltip: {
+      formatter: ({ data: { row: r } }) => `<b>${esc(r.productCode)}</b> ${esc(r.description)}<br>
+        ${moved.from}: ${t("HHI")} ${index(r.from.hhi)}, ${supplier(r.from)}<br>
+        ${moved.to}: ${t("HHI")} ${index(r.to.hhi)}, ${supplier(r.to)}`,
+    },
+    xAxis: { ...axis(), name: t("Supplier HHI"), nameLocation: "middle", nameGap: 26, min: 0, max: 1 },
+    yAxis: { ...axis(), type: "category", inverse: true, data: rows.map(label),
+      axisLabel: { color: css("--muted"), width: Math.min(230, node.clientWidth * 0.4 - 10), overflow: "truncate" } },
+    series: [
+      {
+        type: "lines", coordinateSystem: "cartesian2d", silent: true,
+        data: rows.map((r) => ({ coords: [[r.from.hhi, label(r)], [r.to.hhi, label(r)]], lineStyle: { color: css(r.change > 0 ? "--warn" : "--accent"), width: 2, opacity: 0.6 } })),
+      },
+      { type: "scatter", symbolSize: 9, data: rows.map((r) => dot(r, "from")), itemStyle: { color: css("--surface"), borderColor: css("--muted"), borderWidth: 1.5 } },
+      { type: "scatter", symbolSize: 10, data: rows.map((r) => ({ ...dot(r, "to"), itemStyle: { color: css(r.change > 0 ? "--warn" : "--accent") } })) },
+    ],
+  });
+  plot.on("click", (p) => p.data?.row && (location.hash = `#/product/${p.data.row.productCode}?year=${moved.to}`));
 }

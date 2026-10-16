@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -171,3 +173,27 @@ def test_country_profile_ranks_a_minor_supplier(api):
 
 def test_unknown_country_is_not_found(api):
     assert api.get("/api/countries/999", params={"snapshot": SNAPSHOT}).status_code == 404
+
+
+def later_year(db, code, totalUsd, hhi):
+    doc = db.product_years.find_one({"productCode": code, "year": 2012}, {"_id": 0})
+    doc["year"] = 2015
+    doc["metrics"] = {**doc["metrics"], "totalUsd": Decimal(totalUsd), "hhi": Decimal(hhi)}
+    db.product_years.insert_one(doc)
+
+
+def test_movers_split_rising_and_falling_concentration(api, db):
+    later_year(db, "010121", 120000, "0.9")
+    later_year(db, "310230", 3000, "0.5")
+    moved = api.get("/api/movers", params={"snapshot": SNAPSHOT, "from": 2012, "to": 2015}).json()
+    assert moved["compared"] == 2
+    assert [(r["productCode"], r["change"]) for r in moved["rising"]] == [("010121", pytest.approx(0.44))]
+    assert [(r["productCode"], r["change"]) for r in moved["falling"]] == [("310230", -0.5)]
+
+
+def test_movers_need_the_minimum_value_in_both_years(api, db):
+    later_year(db, "010121", 120000, "0.9")
+    later_year(db, "310230", 3000, "0.5")
+    moved = api.get("/api/movers", params={"snapshot": SNAPSHOT, "from": 2012, "to": 2015, "minValue": 2900}).json()
+    assert moved["compared"] == 1
+    assert moved["falling"] == []

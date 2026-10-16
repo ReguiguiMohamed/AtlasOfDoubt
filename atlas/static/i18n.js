@@ -40,6 +40,11 @@ const FR = {
   "Tunisia supplier HHI": "IHH des fournisseurs de la Tunisie",
   "Few suppliers, open world market": "Peu de fournisseurs, marché mondial ouvert",
   "Few suppliers, few exporters": "Peu de fournisseurs, peu d'exportateurs",
+  "Biggest shifts in concentration, {from} to {to}": "Plus fortes variations de concentration, de {from} à {to}",
+  "Among the {count} products imported in both years at the minimum value or more, the ten whose supplier HHI rose the most and the ten where it fell the most. The hollow dot is {from}, the solid dot {to}, and red marks a rise.":
+    "Parmi les {count} produits importés les deux années au moins à la valeur minimale, les dix dont l'IHH des fournisseurs a le plus augmenté et les dix où il a le plus baissé. Le point creux correspond à {from}, le point plein à {to}, et le rouge signale une hausse.",
+  "Compare with": "Comparer avec",
+  "Supplier HHI": "IHH des fournisseurs",
 
   "Cereals (chapter 10)": "Céréales (chapitre 10)",
   "Wheat and meslin": "Froment et méteil",

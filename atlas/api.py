@@ -121,6 +121,48 @@ def overview(db: Db, snapshot_id: SnapshotId, year: int | None = None, min_value
     return {"snapshot": snapshot_id, "year": year, "rows": list(rows)}
 
 
+@app.get("/api/movers")
+def movers(
+    db: Db,
+    snapshot_id: SnapshotId,
+    start: Annotated[int | None, Query(alias="from")] = None,
+    end: Annotated[int | None, Query(alias="to")] = None,
+    min_value: Annotated[int, Query(alias="minValue", ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+):
+    """Products whose supplier HHI rose or fell the most between two years.
+
+    A product counts only if it reached minValue in both years, so a trickle of imports
+    that swings from one supplier to another does not crowd out the products that matter.
+    """
+    snapshot = ready_snapshot(db, snapshot_id)
+    start = checked_year(snapshot, start if start is not None else min(snapshot["years"]))
+    end = checked_year(snapshot, end)
+    fields = {"_id": 0, "productCode": 1, "description": 1, "metrics.hhi": 1, "metrics.totalUsd": 1, "metrics.topSupplier": 1}
+
+    def year_rows(year):
+        query = {"snapshotId": snapshot_id, "year": year, "metrics.totalUsd": {"$gte": min_value}, "metrics.hhi": {"$ne": None}}
+        found = db.product_years.find(query, fields)
+        return {r["productCode"]: r for r in found}
+
+    before = year_rows(start)
+    changes = []
+    for code, after in year_rows(end).items():
+        if code not in before:
+            continue
+        old, new = before[code]["metrics"], after["metrics"]
+        changes.append({
+            "productCode": code, "description": after["description"],
+            "from": old, "to": new, "change": new["hhi"] - old["hhi"],
+        })
+    changes.sort(key=lambda r: r["change"])
+    return {
+        "snapshot": snapshot_id, "from": start, "to": end, "compared": len(changes),
+        "rising": [r for r in reversed(changes[-limit:]) if r["change"] > 0],
+        "falling": [r for r in changes[:limit] if r["change"] < 0],
+    }
+
+
 @app.get("/api/products/{code}/history")
 def history(db: Db, code: Code, snapshot_id: SnapshotId):
     snapshot = ready_snapshot(db, snapshot_id)
