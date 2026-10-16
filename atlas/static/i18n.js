@@ -58,6 +58,9 @@ const FR = {
   "highly concentrated": "très concentré",
   "{name} leads world exports": "{name} mène les exportations mondiales",
   "Suppliers in {year}": "Fournisseurs en {year}",
+  "Where the supply comes from, {year}": "D'où vient l'offre, {year}",
+  "Shaded by share of Tunisia's imports, with Tunisia in red. Very small countries do not show at this scale and are listed in the table.":
+    "Teinte selon la part des importations tunisiennes, la Tunisie en rouge. Les très petits pays n'apparaissent pas à cette échelle et figurent dans le tableau.",
   "Supplier table": "Tableau des fournisseurs",
   "Imports and concentration, {from} to {to}": "Importations et concentration, de {from} à {to}",
   "Shares of the five largest suppliers over time": "Parts des cinq premiers fournisseurs dans le temps",

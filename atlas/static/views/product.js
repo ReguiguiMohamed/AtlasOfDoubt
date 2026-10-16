@@ -9,6 +9,34 @@ const CASE_STUDIES = [
 ];
 const BARS = 15;
 const TRACKED = 5;
+const ATLAS = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json";
+const ATLAS_SRI = "sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf";
+const TUNISIA = "788";
+// BACI keeps a few pre-ISO country codes where world-atlas uses the current ISO 3166 numeric ones.
+const ISO = { 251: 250, 490: 158, 579: 578, 699: 356, 757: 756, 842: 840 };
+const shapeId = (code) => String(ISO[code] ?? code).padStart(3, "0");
+
+let world;
+function loadWorld() {
+  world ??= fetch(ATLAS, { integrity: ATLAS_SRI })
+    .then((r) => r.json())
+    .then((topo) => {
+      const shapes = topojson.feature(topo, topo.objects.countries);
+      shapes.features = shapes.features.filter((f) => f.properties.name !== "Antarctica");
+      // Somaliland, Northern Cyprus and Kosovo carry no ISO id, so they keep their own name and match no supplier.
+      for (const f of shapes.features) {
+        f.properties.name = f.id ?? f.properties.name;
+        // Russia and Fiji have rings that cross the antimeridian and would draw a band across the whole map.
+        const polygons = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+        for (const ring of polygons.flat()) {
+          const xs = ring.map(([x]) => x);
+          if (Math.max(...xs) - Math.min(...xs) > 180) for (const point of ring) if (point[0] < 0) point[0] += 360;
+        }
+      }
+      echarts.registerMap("world", shapes);
+    });
+  return world;
+}
 
 export default async function product(root, [code], params) {
   if (!code) return search(root, params.get("q") ?? "");
@@ -47,6 +75,9 @@ export default async function product(root, [code], params) {
       ${kpi(t("HHI"), index(m.hhi), m.hhi >= 0.25 ? t("highly concentrated") : "")}
       ${current.world ? kpi(t("World exporter HHI"), index(current.world.hhi), t("{name} leads world exports", { name: current.world.topSupplier?.countryName })) : ""}
     </div>
+    <div class="panel" id="where"><h2>${t("Where the supply comes from, {year}", { year: current.year })}</h2>
+      <p>${t("Shaded by share of Tunisia's imports, with Tunisia in red. Very small countries do not show at this scale and are listed in the table.")}</p>
+      <div class="chart map" id="map"></div></div>
     <div class="grid">
       <div class="panel"><h2>${t("Suppliers in {year}", { year: current.year })}</h2><div class="chart tall" id="bars"></div></div>
       <div class="panel"><h2>${t("Supplier table")}</h2><div id="suppliers"></div></div>
@@ -92,6 +123,40 @@ export default async function product(root, [code], params) {
       ...(single ? [tonsColumn(t("Tonnes"), "quantityTonnes")] : []),
     ],
   });
+
+  const where = root.querySelector("#where");
+  loadWorld()
+    .then(() => where.isConnected && chart(where.querySelector("#map"), {
+      tooltip: { formatter: (p) => (p.data?.supplier ? `${esc(p.data.supplier.countryName)}: ${usd(p.data.supplier.valueUsd)} (${pct(p.data.supplier.share)})` : "") },
+      visualMap: {
+        min: 0,
+        max: ranked[0].share,
+        orient: "horizontal",
+        left: "center",
+        bottom: 0,
+        itemWidth: 10,
+        itemHeight: 120,
+        text: [pct(ranked[0].share, 0), pct(0, 0)],
+        textStyle: { color: css("--muted") },
+        inRange: { color: [css("--accent-soft"), css("--accent")] },
+      },
+      series: [{
+        type: "map",
+        map: "world",
+        selectedMode: false,
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 34,
+        itemStyle: { areaColor: css("--tint"), borderColor: css("--line") },
+        emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent-2") } },
+        data: [
+          ...ranked.map((s) => ({ name: shapeId(s.countryCode), value: s.share, supplier: s })),
+          { name: TUNISIA, itemStyle: { areaColor: css("--warn") }, emphasis: { disabled: true } },
+        ],
+      }],
+    }))
+    .catch(() => where.remove());
 
   const years = data.years.map((y) => String(y.year));
   chart(root.querySelector("#trend"), {
