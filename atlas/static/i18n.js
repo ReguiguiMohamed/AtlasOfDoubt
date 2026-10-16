@@ -239,6 +239,9 @@ const FR = {
   "West and Southern Africa": "Afrique de l'Ouest et australe",
   "South America, Pacific coast": "Amérique du Sud, côte pacifique",
   "Mediterranean and overland": "Méditerranée et voie terrestre",
+  "Zoom in": "Zoomer",
+  "Zoom out": "Dézoomer",
+  "Whole world": "Monde entier",
 };
 
 const LANGS = ["en", "fr"];

@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { TUNISIA, api, axis, chart, count, css, esc, html, index, kpi, loadWorld, pct, pctColumn, query, shapeId, state, table, tonsColumn, usd, usdColumn } from "../lib.js";
+import { TUNISIA, api, axis, chart, count, css, esc, html, index, kpi, loadWorld, pct, pctColumn, query, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
 
 const CASE_STUDIES = [
   ["10", "Cereals (chapter 10)"],
@@ -105,7 +105,7 @@ export default async function product(root, [code], params) {
 
   const where = root.querySelector("#where");
   loadWorld()
-    .then(() => where.isConnected && chart(where.querySelector("#map"), {
+    .then(() => where.isConnected && zoomable(chart(where.querySelector("#map"), {
       tooltip: { formatter: (p) => (p.data?.supplier ? `${esc(p.data.supplier.countryName)}: ${usd(p.data.supplier.valueUsd)} (${pct(p.data.supplier.share)})` : "") },
       visualMap: {
         min: 0,
@@ -134,7 +134,7 @@ export default async function product(root, [code], params) {
           { name: TUNISIA, itemStyle: { areaColor: css("--warn") }, emphasis: { disabled: true } },
         ],
       }],
-    }).on("click", (p) => profile(p.data?.supplier?.countryCode)))
+    }), "series").on("click", (p) => profile(p.data?.supplier?.countryCode)))
     .catch(() => where.remove());
 
   const years = data.years.map((y) => String(y.year));

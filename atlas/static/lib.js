@@ -115,6 +115,23 @@ export const tonsColumn = numeric(tons);
 export const kpi = (label, value, note = "") =>
   `<div class="kpi"><span class="label">${esc(label)}</span><strong>${esc(value)}</strong>${note && `<span class="note">${esc(note)}</span>`}</div>`;
 
+// Wheel, pinch and drag move a map, and the buttons serve readers without a wheel.
+export function zoomable(instance, component) {
+  const at = (option) => instance.setOption({ [component]: [option] });
+  const zoom = (by) => at({ zoom: Math.min(8, Math.max(1, (instance.getOption()[component][0].zoom ?? 1) * by)) });
+  const controls = html(`<div class="zoom">
+    <button type="button" title="${t("Zoom in")}" aria-label="${t("Zoom in")}">+</button>
+    <button type="button" title="${t("Zoom out")}" aria-label="${t("Zoom out")}">−</button>
+    <button type="button">${t("Whole world")}</button></div>`).firstElementChild;
+  const [zoomIn, zoomOut, reset] = controls.children;
+  zoomIn.addEventListener("click", () => zoom(1.5));
+  zoomOut.addEventListener("click", () => zoom(1 / 1.5));
+  reset.addEventListener("click", () => at({ zoom: 1, center: null }));
+  at({ roam: true, scaleLimit: { min: 1, max: 8 } });
+  instance.getDom().append(controls);
+  return instance;
+}
+
 const ATLAS = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json";
 const ATLAS_SRI = "sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf";
 export const TUNISIA = "788";

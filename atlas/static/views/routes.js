@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { TUNISIA, api, axis, chart, count, css, esc, html, kpi, loadWorld, pct, pctColumn, query, shapeId, state, table, usd, usdColumn } from "../lib.js";
+import { TUNISIA, api, axis, chart, count, css, esc, html, kpi, loadWorld, pct, pctColumn, query, shapeId, state, table, usd, usdColumn, zoomable } from "../lib.js";
 
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -109,7 +109,7 @@ export default async function seaRoutes(root, _, params) {
   loadWorld()
     .then(() => {
       if (!where.isConnected) return;
-      map = chart(where.querySelector("#map"), { tooltip: { formatter: (p) => (p.data?.item ? tip(p.data.item) : "") }, ...mapOption() });
+      map = zoomable(chart(where.querySelector("#map"), { tooltip: { formatter: (p) => (p.data?.item ? tip(p.data.item) : "") }, ...mapOption() }), "geo");
       map.on("click", (p) => p.data?.item && select(p.data.item));
     })
     .catch(() => where.remove());

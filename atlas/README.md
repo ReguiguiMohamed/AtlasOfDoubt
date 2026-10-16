@@ -51,6 +51,8 @@ the snapshot's source and archive hash at save time.
 | `#/scenario?mode&code&year&suppliers&reduction` | product or supplier-country disruption, previewed live, saved as a report |
 | `#/reports` and `#/reports/{id}` | saved reports with provenance, limitations, CSV download and a print layout that keeps every table row |
 
+Both maps zoom with the wheel, a pinch or the + and − buttons, and pan by dragging. Whole world resets them.
+
 Each view renders into a fresh section, so a slow request from a view the
 reader already left writes into a detached node instead of the current page.
 
