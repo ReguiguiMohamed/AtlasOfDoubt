@@ -80,6 +80,7 @@ def test_snapshot_records_provenance_and_counts(db, make_archive):
     snapshot = ingest(make_archive(FLOWS), db)
     assert len(snapshot["archive"]["sha256"]) == 64
     assert snapshot["reporter"] == {"countryCode": 788, "countryName": "Tunisia", "isoCode": "TUN"}
+    assert snapshot["countries"][1] == {"countryCode": 251, "countryName": "France", "isoCode": "FRA", "iso2": "FR"}
     assert snapshot["counts"] == {
         "rows": 11,
         "tunisiaRows": 5,

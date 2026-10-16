@@ -185,10 +185,11 @@ def ingest(path, db):
     try:
         with zipfile.ZipFile(path) as archive:
             country_rows = read_dictionary(
-                archive, f"country_codes_V{release}.csv", ["country_code", "country_name", "country_iso3"]
+                archive, f"country_codes_V{release}.csv", ["country_code", "country_name", "country_iso2", "country_iso3"]
             )
             product_rows = read_dictionary(archive, f"product_codes_{classification}_V{release}.csv", ["code", "description"])
             countries = {r["country_code"]: (r["country_name"], r["country_iso3"]) for r in country_rows}
+            iso2 = {r["country_code"]: r["country_iso2"] or None for r in country_rows}
             products = {r["code"].zfill(6): r["description"] for r in product_rows}
             reporter = next((code for code, (_, iso3) in countries.items() if iso3 == REPORTER_ISO3), None)
             if reporter is None:
@@ -244,7 +245,7 @@ def ingest(path, db):
         "importedAt": datetime.now(timezone.utc),
         "reporter": {"countryCode": int(reporter), "countryName": reporter_name, "isoCode": reporter_iso3},
         "countries": [
-            {"countryCode": int(code), "countryName": name, "isoCode": iso3}
+            {"countryCode": int(code), "countryName": name, "isoCode": iso3, "iso2": iso2[code]}
             for code, (name, iso3) in sorted(countries.items(), key=lambda item: item[1][0])
         ],
         "files": files,
