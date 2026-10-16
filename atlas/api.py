@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pymongo.database import Database
 
-from atlas import metrics
+from atlas import metrics, routes
 from atlas.db import connect
 
 CODE_PATTERN = r"^\d{2}(\d{2}){0,2}$"
@@ -237,7 +237,71 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, year: in
         {"$sort": {"valueUsd": -1}},
     ])
     products = [{**r, "share": r["valueUsd"] / r["totalUsd"]} for r in rows]
-    return {"snapshot": snapshot_id, "year": year, "country": country, "years": years, "products": products}
+    route = next((r for r in routes.ROUTES if r["id"] == routes.ROUTE_OF.get(country["isoCode"])), None)
+    return {
+        "snapshot": snapshot_id, "year": year, "country": country, "years": years, "products": products,
+        "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]} if route else None,
+    }
+
+
+@app.get("/api/routes")
+def sea_routes(
+    db: Db,
+    snapshot_id: SnapshotId,
+    year: int | None = None,
+    code: Annotated[str | None, Query(pattern=CODE_PATTERN)] = None,
+):
+    """Imports grouped by modelled sea route and chokepoint, for one year and as a yearly trend.
+
+    A chokepoint carries the sum of the routes through it, so a country counts once
+    per strait it passes and never twice on one strait.
+    """
+    snapshot = ready_snapshot(db, snapshot_id)
+    year = checked_year(snapshot, year)
+    match = {"snapshotId": snapshot_id}
+    if code:
+        group_products(db, snapshot_id, code)
+        match["productCode"] = {"$regex": f"^{code}"}
+    names = {c["countryCode"]: c for c in snapshot["countries"]}
+    supplied = db.product_years.aggregate([
+        {"$match": match},
+        {"$unwind": "$suppliers"},
+        {"$group": {"_id": {"year": "$year", "country": "$suppliers.countryCode"}, "valueUsd": {"$sum": "$suppliers.valueUsd"}}},
+    ])
+    by_year = {y: [] for y in snapshot["years"]}
+    for r in supplied:
+        country = names.get(r["_id"]["country"], {"countryCode": r["_id"]["country"], "countryName": str(r["_id"]["country"])})
+        by_year[r["_id"]["year"]].append({
+            "countryCode": country["countryCode"], "countryName": country["countryName"],
+            "isoCode": country.get("isoCode"), "valueUsd": r["valueUsd"],
+        })
+    grouped = {y: routes.by_route(s) for y, s in by_year.items()}
+    totals = {y: metrics.total(s) for y, s in by_year.items()}
+
+    def measure(route_ids, y):
+        value = metrics.total(s for r in route_ids for s in grouped[y].get(r, []))
+        return {"year": y, "valueUsd": value, "share": value / totals[y] if totals[y] else None}
+
+    def entry(route_ids):
+        suppliers = [s for r in route_ids for s in grouped[year].get(r, [])]
+        return {
+            **measure(route_ids, year),
+            "countries": metrics.with_shares(suppliers),
+            "years": [measure(route_ids, y) for y in snapshot["years"]],
+        }
+
+    return {
+        "snapshot": snapshot_id, "year": year, "code": code, "totalUsd": totals[year],
+        "chokepoints": [
+            {"id": c, "name": p["name"], "at": p["at"], "routes": routes.through(c), **entry(routes.through(c))}
+            for c, p in routes.CHOKEPOINTS.items()
+        ],
+        "routes": [
+            {"id": r["id"], "name": r["name"], "via": r["via"], "path": r["path"], **entry([r["id"]])}
+            for r in routes.ROUTES
+        ],
+        "unrouted": entry([None]),
+    }
 
 
 LIMITATIONS = [

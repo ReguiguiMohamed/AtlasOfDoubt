@@ -114,3 +114,32 @@ export const tonsColumn = numeric(tons);
 
 export const kpi = (label, value, note = "") =>
   `<div class="kpi"><span class="label">${esc(label)}</span><strong>${esc(value)}</strong>${note && `<span class="note">${esc(note)}</span>`}</div>`;
+
+const ATLAS = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json";
+const ATLAS_SRI = "sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf";
+export const TUNISIA = "788";
+// BACI keeps a few pre-ISO country codes where world-atlas uses the current ISO 3166 numeric ones.
+const ISO = { 251: 250, 490: 158, 579: 578, 699: 356, 757: 756, 842: 840 };
+export const shapeId = (code) => String(ISO[code] ?? code).padStart(3, "0");
+
+let world;
+export function loadWorld() {
+  world ??= fetch(ATLAS, { integrity: ATLAS_SRI })
+    .then((r) => r.json())
+    .then((topo) => {
+      const shapes = topojson.feature(topo, topo.objects.countries);
+      shapes.features = shapes.features.filter((f) => f.properties.name !== "Antarctica");
+      // Somaliland, Northern Cyprus and Kosovo carry no ISO id, so they keep their own name and match no supplier.
+      for (const f of shapes.features) {
+        f.properties.name = f.id ?? f.properties.name;
+        // Russia and Fiji have rings that cross the antimeridian and would draw a band across the whole map.
+        const polygons = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+        for (const ring of polygons.flat()) {
+          const xs = ring.map(([x]) => x);
+          if (Math.max(...xs) - Math.min(...xs) > 180) for (const point of ring) if (point[0] < 0) point[0] += 360;
+        }
+      }
+      echarts.registerMap("world", shapes);
+    });
+  return world;
+}

@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from atlas import routes
 from atlas.api import app
 from atlas.ingest import ingest
 from tests.test_ingest import FLOWS
@@ -173,6 +174,38 @@ def test_country_profile_ranks_a_minor_supplier(api):
 
 def test_unknown_country_is_not_found(api):
     assert api.get("/api/countries/999", params={"snapshot": SNAPSHOT}).status_code == 404
+
+
+def test_routes_sum_countries_into_routes_and_chokepoints(api):
+    body = api.get("/api/routes", params={"snapshot": SNAPSHOT, "year": 2012}).json()
+    route = {r["id"]: r for r in body["routes"]}
+    strait = {c["id"]: c for c in body["chokepoints"]}
+    assert body["totalUsd"] == 102734
+    assert route["direct"]["valueUsd"] == 92734
+    assert [c["countryName"] for c in route["direct"]["countries"]] == ["France", "Italy"]
+    assert route["americas"]["valueUsd"] == strait["gibraltar"]["valueUsd"] == 10000
+    assert strait["gibraltar"]["share"] == pytest.approx(10000 / 102734)
+    assert strait["suez"]["valueUsd"] == 0
+    assert body["unrouted"]["valueUsd"] == 0
+    assert {y["year"]: y["share"] for y in route["direct"]["years"]}[2015] == 1
+
+
+def test_routes_of_one_product(api):
+    body = api.get("/api/routes", params={"snapshot": SNAPSHOT, "year": 2012, "code": "31"}).json()
+    assert body["totalUsd"] == 2734
+    assert {r["id"]: r["valueUsd"] for r in body["routes"]}["americas"] == 0
+
+
+def test_country_profile_names_its_route(api):
+    usa = api.get("/api/countries/842", params={"snapshot": SNAPSHOT}).json()["route"]
+    assert (usa["id"], usa["via"]) == ("americas", ["Strait of Gibraltar"])
+
+
+def test_each_country_has_one_route_through_known_chokepoints():
+    countries = [iso for r in routes.ROUTES for iso in r["countries"].split()]
+    assert len(countries) == len(set(countries))
+    assert all(c in routes.CHOKEPOINTS for r in routes.ROUTES for c in r["via"])
+    assert all(r["path"][-1] == routes.TUNIS for r in routes.ROUTES if r["path"])
 
 
 def later_year(db, code, totalUsd, hhi):

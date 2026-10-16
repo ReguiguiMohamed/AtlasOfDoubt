@@ -4,9 +4,10 @@ import overview from "./views/overview.js";
 import country from "./views/country.js";
 import product from "./views/product.js";
 import reports from "./views/reports.js";
+import seaRoutes from "./views/routes.js";
 import scenario from "./views/scenario.js";
 
-const routes = { overview, product, country, scenario, reports };
+const routes = { overview, product, country, routes: seaRoutes, scenario, reports };
 const main = document.getElementById("view");
 const picker = document.getElementById("snapshot");
 

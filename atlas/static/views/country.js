@@ -22,6 +22,9 @@ export default async function country(root, [code], params) {
     <div class="head">
       <h1><span class="code">${esc(data.country.isoCode)}</span> ${esc(name)}</h1>
       <p class="lede">${t("Everything Tunisia imported from {name}, product by product. Share and rank are measured among each product's suppliers.", { name: esc(name) })}</p>
+      ${data.route ? `<p class="lede">${esc(t("Modelled sea route to Tunisia: {route}, {via}.", {
+        route: t(data.route.name), via: data.route.via.length ? data.route.via.map((v) => t(v)).join(" → ") : t("no chokepoint"),
+      }))} <a href="#/routes?${query({ select: data.route.id, year: data.year })}">${t("Sea routes")}</a></p>` : ""}
       <form class="controls">
         <label>${t("Year")} <select name="year">${recorded
           .map((y) => `<option ${y.year === data.year ? "selected" : ""}>${y.year}</option>`).reverse().join("")}</select></label>

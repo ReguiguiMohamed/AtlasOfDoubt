@@ -15,7 +15,7 @@ A concentrated supplier list is a choice when the world market is open and a con
 1. **Import.** `python -m atlas.ingest` streams the 13 yearly files of a BACI release, keeps the 717,531 flows into Tunisia, and stores one document per product and year with its suppliers embedded and its measures computed.
 2. **Snapshot.** Every release lands under its own id, `BACI_HS12_V202601`, so a later release never changes numbers a report already cites.
 3. **Measure.** One module, `atlas/metrics.py`, computes totals, top share, top-3 share and HHI. The import, the API and saved reports all call it.
-4. **Explore.** A FastAPI server serves the API and a web app with an overview, product and supplier-country pages, the "Choice or structure?" quadrant and the biggest shifts in concentration since 2012.
+4. **Explore.** A FastAPI server serves the API and a web app with an overview, product and supplier-country pages, the "Choice or structure?" quadrant, the biggest shifts in concentration since 2012 and a map of modelled sea routes with the value behind each strait. In 2024, $5.3B of the $25.7B Tunisia imported came from countries whose usual lane runs through Suez.
 5. **Stress test.** A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report with its source hash, a CSV export and a print layout.
 
 ```mermaid
