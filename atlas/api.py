@@ -12,10 +12,12 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
 from bson import ObjectId
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pymongo.database import Database
 
@@ -273,3 +275,7 @@ def report_csv(db: Db, report_id: str):
 @app.get("/api/reports/{report_id}")
 def get_report(db: Db, report_id: str):
     return find_report(db, report_id)
+
+
+# Mounted last so every /api route above wins over the static catch-all.
+app.mount("/", StaticFiles(directory=FilePath(__file__).parent / "static", html=True), name="static")

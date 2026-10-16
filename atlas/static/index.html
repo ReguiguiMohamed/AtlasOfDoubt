@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AtlasOfDoubt</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/css/tabulator_simple.min.css"
+        integrity="sha384-V4N7xA98XpwXEziukVT23ibnUCmr8LbIxUQpT4PSUD3yp1TgQyMvrAAelVOuO0C0" crossorigin="anonymous">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"
+          integrity="sha384-pPi0zxBAoDu6+JXW/C68UZLvBUUtU+7zonhif43rqj7pxsGyqyqzcian2Rj37Rss" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.1/dist/js/tabulator.min.js"
+          integrity="sha384-SKSq3cuuVWdfrjtLz9wNlqE0bMc903yMS5zGnFtwvfddplgxa1hywtiLyw1CbSHO" crossorigin="anonymous"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/overview">Atlas<span>Of</span>Doubt</a>
+    <nav>
+      <a href="#/overview" data-nav="overview">Overview</a>
+      <a href="#/product" data-nav="product">Product</a>
+      <a href="#/scenario" data-nav="scenario">Scenario</a>
+      <a href="#/reports" data-nav="reports">Reports</a>
+    </nav>
+    <label class="snapshot">Snapshot <select id="snapshot"></select></label>
+  </header>
+  <main id="view" aria-live="polite"></main>
+  <footer class="foot" id="citation"></footer>
+</body>
+</html>
