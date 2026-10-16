@@ -80,6 +80,7 @@ function list(root) {
     <div class="head">
       <h1>${t("Supplier countries")}</h1>
       <p class="lede">${t("Pick a country to see what it sends Tunisia, how much of Tunisia's imports it carries, and the products where it leads.")}</p>
+      <div class="controls"><label>${t("Search")} <input type="search" id="filter" placeholder="${t("Filter countries")}" autofocus></label></div>
     </div>
     <div class="panel"><div id="countries"></div></div>
   `));
@@ -89,9 +90,14 @@ function list(root) {
     paginationSize: 20,
     initialSort: [{ column: "countryName", dir: "asc" }],
     columns: [
-      { title: t("Country"), field: "countryName", headerFilter: "input", headerFilterPlaceholder: t("Filter countries") },
+      { title: t("Country"), field: "countryName" },
       { title: t("ISO"), field: "isoCode", width: 90 },
     ],
   });
   countries.on("rowClick", (_, row) => (location.hash = `#/country/${row.getData().countryCode}`));
+  // Tabulator's own header filter waits for keyup, so pasted or autofilled text never filtered.
+  root.querySelector("#filter").addEventListener("input", (e) => {
+    const term = e.target.value.trim().toLowerCase();
+    countries.setFilter(term ? (c) => c.countryName.toLowerCase().includes(term) || c.isoCode?.toLowerCase() === term : []);
+  });
 }

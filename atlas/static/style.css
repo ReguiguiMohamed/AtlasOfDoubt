@@ -18,6 +18,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Any display rule on an element beats the browser's own [hidden] style. */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;

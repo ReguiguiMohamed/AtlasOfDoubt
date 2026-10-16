@@ -73,6 +73,8 @@ export function chart(node, option) {
     textStyle: { fontFamily: css("--font"), color: css("--ink") },
     animationDuration: 300,
     ...option,
+    // Unconfined, a tooltip near the chart edge spills past the page.
+    tooltip: { confine: true, ...option.tooltip },
   });
   charts.add(instance);
   return instance;
