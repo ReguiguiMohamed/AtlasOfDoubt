@@ -10,7 +10,8 @@ function localize(value) {
   if (Array.isArray(value)) value.forEach(localize);
   else if (value && typeof value === "object") {
     const code = value.iso2 ?? alpha2.get(value.countryCode);
-    if (code && typeof value.countryName === "string") value.countryName = regionNames.of(code);
+    // BACI gives defunct entities such as "Fed. Rep. of Germany (...1990)" the code of today's country, so they keep their own name.
+    if (code && typeof value.countryName === "string" && !value.countryName.includes("(...")) value.countryName = regionNames.of(code);
     Object.values(value).forEach(localize);
   }
   return value;
