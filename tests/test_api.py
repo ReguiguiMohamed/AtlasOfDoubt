@@ -143,3 +143,7 @@ def test_unknown_report_is_not_found(api):
 def test_static_files_are_revalidated(api):
     assert api.get("/").headers["cache-control"] == "no-cache"
     assert api.get("/app.js").headers["cache-control"] == "no-cache"
+
+
+def test_responses_are_compressed(api):
+    assert api.get("/app.js", headers={"accept-encoding": "gzip"}).headers["content-encoding"] == "gzip"

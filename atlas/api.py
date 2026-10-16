@@ -17,6 +17,7 @@ from typing import Annotated, Literal
 
 from bson import ObjectId
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pymongo.database import Database
@@ -35,6 +36,8 @@ async def lifespan(app):
 
 
 app = FastAPI(title="AtlasOfDoubt", lifespan=lifespan)
+# The overview sends every imported product at once, about 2 MB of JSON for a real year.
+app.add_middleware(GZipMiddleware)
 
 
 def database(request: Request):
