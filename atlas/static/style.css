@@ -149,6 +149,7 @@ dl.facts dd { margin: 0; word-break: break-word; }
 .tabulator-row { border-bottom: 1px solid var(--line); }
 .tabulator-row.tabulator-row-even { background: var(--surface); }
 .tabulator-row.tabulator-selectable:hover { background: var(--accent-soft); cursor: pointer; }
+.tabulator-row.untapped .tabulator-cell[tabulator-field="tunisia"] { color: var(--warn); font-weight: 600; }
 .tabulator .tabulator-footer { background: var(--surface); color: var(--muted); border-top: 0; }
 .tabulator .tabulator-footer .tabulator-page { color: var(--ink); background: var(--surface); border-radius: var(--radius); }
 .tabulator .tabulator-footer .tabulator-page.active { color: var(--warn); font-weight: 600; }

@@ -70,6 +70,11 @@ const FR = {
   "Imports and concentration, {from} to {to}": "Importations et concentration, de {from} à {to}",
   "Shares of the five largest suppliers over time": "Parts des cinq premiers fournisseurs dans le temps",
   "Products in this group": "Produits de ce groupe",
+  "Who else sells it, {year}": "Qui d'autre le vend, {year}",
+  "The largest exporters of this product worldwide, against what each sent Tunisia. A large exporter that sends little is a supplier Tunisia could turn to.":
+    "Les premiers exportateurs mondiaux de ce produit, face à ce que chacun a envoyé à la Tunisie. Un grand exportateur qui envoie peu est un fournisseur vers lequel la Tunisie pourrait se tourner.",
+  "Share of world exports": "Part des exportations mondiales",
+  "Share of Tunisia's imports": "Part des importations tunisiennes",
   "{count} others": "{count} autres",
   "Country": "Pays",
   "ISO": "ISO",

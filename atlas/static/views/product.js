@@ -85,6 +85,9 @@ export default async function product(root, [code], params) {
     <div class="panel" style="margin-top:1.25rem"><h2>${t("Imports and concentration, {from} to {to}", { from: data.years[0].year, to: data.years.at(-1).year })}</h2>
       <div class="chart" id="trend"></div></div>
     <div class="panel"><h2>${t("Shares of the five largest suppliers over time")}</h2><div class="chart" id="shares"></div></div>
+    ${current.world ? `<div class="panel"><h2>${t("Who else sells it, {year}", { year: current.year })}</h2>
+      <p>${t("The largest exporters of this product worldwide, against what each sent Tunisia. A large exporter that sends little is a supplier Tunisia could turn to.")}</p>
+      <div id="exporters"></div></div>` : ""}
     ${single ? "" : `<div class="panel"><h2>${t("Products in this group")}</h2><div id="members"></div></div>`}
   `));
   if (m.hhi >= 0.25) root.querySelector(".kpis .kpi:nth-child(5)").classList.add("alert");
@@ -196,6 +199,21 @@ export default async function product(root, [code], params) {
       data: data.years.map((y) => (y.metrics ? y.suppliers.find((s) => s.countryCode === country)?.share ?? 0 : null)),
     })),
   });
+
+  if (current.world) {
+    const share = Object.fromEntries(ranked.map((s) => [s.countryCode, s.share]));
+    const exporters = table(root.querySelector("#exporters"), {
+      data: current.world.topExporters.map((e) => ({ ...e, tunisia: share[e.countryCode] ?? 0 })),
+      pagination: false,
+      rowFormatter: (row) => row.getData().tunisia === 0 && row.getElement().classList.add("untapped"),
+      columns: [
+        { title: t("Country"), field: "countryName", minWidth: 140 },
+        pctColumn(t("Share of world exports"), "share"),
+        pctColumn(t("Share of Tunisia's imports"), "tunisia"),
+      ],
+    });
+    exporters.on("rowClick", (_, row) => profile(row.getData().countryCode));
+  }
 
   if (!single) {
     const members = table(root.querySelector("#members"), {
