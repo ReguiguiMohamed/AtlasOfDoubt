@@ -43,7 +43,10 @@ async function report(root, id) {
     <div class="head">
       <h1>${esc(r.title)}</h1>
       <p class="lede">${esc(t("Saved {date}.", { date: stamp.format(new Date(r.createdAt)) }))} ${esc(summary)}</p>
-      <div class="controls"><a href="/api/reports/${esc(id)}.csv" download><button class="primary">${t("Download CSV")}</button></a></div>
+      <div class="controls">
+        <a href="/api/reports/${esc(id)}.csv" download><button class="primary">${t("Download CSV")}</button></a>
+        <button type="button" id="print">${t("Print or save as PDF")}</button>
+      </div>
     </div>
     <div class="grid">
       <div class="panel"><h2>${t("Result")}</h2><div id="result"></div></div>
@@ -62,5 +65,6 @@ async function report(root, id) {
       </div>
     </div>
     <div id="details"></div>`));
+  root.querySelector("#print").addEventListener("click", () => print());
   showResult(root, spec, r.result);
 }

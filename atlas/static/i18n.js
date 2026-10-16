@@ -161,6 +161,7 @@ const FR = {
   "{scope}, {year}, a {cut} cut from 1 supplier.": "{scope}, {year}, réduction de {cut} sur 1 fournisseur.",
   "{scope}, {year}, a {cut} cut from {count} suppliers.": "{scope}, {year}, réduction de {cut} sur {count} fournisseurs.",
   "Download CSV": "Télécharger le CSV",
+  "Print or save as PDF": "Imprimer ou enregistrer en PDF",
   "Provenance": "Provenance",
   "Source": "Source",
   "Archive": "Archive",

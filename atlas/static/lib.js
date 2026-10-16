@@ -82,7 +82,10 @@ export function disposeCharts() {
   charts.clear();
 }
 
-window.addEventListener("resize", () => charts.forEach((c) => c.resize()));
+const resizeCharts = () => charts.forEach((c) => c.resize());
+window.addEventListener("resize", resizeCharts);
+// A printed page is narrower than the screen, and a canvas keeps the width it was drawn at.
+matchMedia("print").addEventListener("change", resizeCharts);
 
 export const axis = () => ({
   axisLine: { lineStyle: { color: css("--line") } },
@@ -91,7 +94,11 @@ export const axis = () => ({
 });
 
 export function table(node, options) {
-  return new Tabulator(node, { layout: "fitColumns", pagination: true, paginationSize: 25, locale: lang, langs: TABULATOR_LANGS, ...options });
+  // Printing swaps in a plain table of every row, so a printed report is not cut to the page on screen.
+  return new Tabulator(node, {
+    layout: "fitColumns", pagination: true, paginationSize: 25, locale: lang, langs: TABULATOR_LANGS,
+    printAsHtml: true, printRowRange: "all", ...options,
+  });
 }
 
 // Tabulator guesses a sorter from the data and compares these as text, so 67.8M lands above 235M.
