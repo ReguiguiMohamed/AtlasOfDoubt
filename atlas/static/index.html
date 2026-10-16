@@ -26,12 +26,15 @@
   <header class="top">
     <a class="brand" href="#/overview"><img src="logo.svg" alt="">Atlas <em>of</em> Doubt</a>
     <nav>
-      <a href="#/overview" data-nav="overview">Overview</a>
-      <a href="#/product" data-nav="product">Product</a>
-      <a href="#/scenario" data-nav="scenario">Scenario</a>
-      <a href="#/reports" data-nav="reports">Reports</a>
+      <a href="#/overview" data-nav="overview" data-i18n>Overview</a>
+      <a href="#/product" data-nav="product" data-i18n>Product</a>
+      <a href="#/scenario" data-nav="scenario" data-i18n>Scenario</a>
+      <a href="#/reports" data-nav="reports" data-i18n>Reports</a>
     </nav>
-    <label class="snapshot">Snapshot <select id="snapshot"></select></label>
+    <label class="snapshot"><span data-i18n>Snapshot</span> <select id="snapshot"></select></label>
+    <span class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en" lang="en">EN</button><button type="button" data-lang="fr" lang="fr">FR</button>
+    </span>
   </header>
   <main id="view" aria-live="polite"></main>
   <footer class="foot" id="citation"></footer>

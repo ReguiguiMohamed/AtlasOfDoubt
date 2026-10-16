@@ -1,4 +1,5 @@
-import { api, disposeCharts, esc, state } from "./lib.js";
+import { lang, switchLang, t } from "./i18n.js";
+import { api, disposeCharts, esc, snapshotDetail, state } from "./lib.js";
 import overview from "./views/overview.js";
 import product from "./views/product.js";
 import reports from "./views/reports.js";
@@ -18,11 +19,12 @@ async function render() {
   const section = document.createElement("section");
   main.replaceChildren(section);
   if (!state.snapshot) {
-    section.innerHTML = `<div class="empty"><h1>No snapshot yet</h1><p>Import a BACI release first:</p>
+    section.innerHTML = `<div class="empty"><h1>${t("No snapshot yet")}</h1><p>${t("Import a BACI release first:")}</p>
       <pre>python -m atlas.ingest data/raw/BACI_HS12_V202601.zip</pre></div>`;
     return;
   }
   try {
+    await snapshotDetail();
     await view(section, rest, new URLSearchParams(search));
   } catch (error) {
     section.innerHTML = `<p class="error">${esc(error.message)}</p>`;
@@ -32,10 +34,18 @@ async function render() {
 function showCitation() {
   const source = state.snapshot?.source;
   document.getElementById("citation").innerHTML = source
-    ? `Data: ${esc(source.name)} ${esc(source.classification)}, release ${esc(source.release)}, ${esc(source.valueUnit)}.
-       ${esc(source.citation)} Licence: ${esc(source.license)}.`
+    ? esc(t("Data: {name} {classification}, release {release}, {unit}. {citation} Licence: {license}.", {
+        ...source,
+        unit: t(source.valueUnit),
+      }))
     : "";
 }
+
+document.querySelectorAll("[data-i18n]").forEach((node) => (node.textContent = t(node.textContent)));
+document.querySelectorAll("[data-lang]").forEach((button) => {
+  button.classList.toggle("active", button.dataset.lang === lang);
+  button.addEventListener("click", () => button.dataset.lang !== lang && switchLang(button.dataset.lang));
+});
 
 state.snapshots = await api("/snapshots");
 let saved = null;

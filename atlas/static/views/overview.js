@@ -1,4 +1,5 @@
-import { api, axis, chart, css, esc, html, index, indexColumn, pct, pctColumn, query, state, table, usd, usdColumn } from "../lib.js";
+import { t } from "../i18n.js";
+import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctColumn, query, state, table, usd, usdColumn } from "../lib.js";
 
 // 0.25 is where the 2010 US Horizontal Merger Guidelines start calling a market highly concentrated (HHI 2500 of 10000).
 const HIGH = 0.25;
@@ -22,28 +23,23 @@ export default async function overview(root, _, params) {
 
   root.append(html(`
     <div class="head">
-      <h1>Tunisian imports by supplier concentration, ${data.year}</h1>
-      <p class="lede">Each HS6 product Tunisia imported in ${data.year}, with how much of its value came from the
-        largest supplier, the three largest, and the Herfindahl-Hirschman index (0 to 1, where 1 means a single
-        supplier). Click a product to investigate it.</p>
+      <h1>${t("Tunisian imports by supplier concentration, {year}", { year: data.year })}</h1>
+      <p class="lede">${t("Each HS6 product Tunisia imported in {year}, with how much of its value came from the largest supplier, the three largest, and the Herfindahl-Hirschman index (0 to 1, where 1 means a single supplier). Click a product to investigate it.", { year: data.year })}</p>
       <form class="controls">
-        <label>Year <select name="year">${state.snapshot.years
+        <label>${t("Year")} <select name="year">${state.snapshot.years
           .map((y) => `<option ${y === data.year ? "selected" : ""}>${y}</option>`).reverse().join("")}</select></label>
-        <label>Minimum import value <select name="minValue">${THRESHOLDS
-          .map((t) => `<option value="${t}" ${t === minValue ? "selected" : ""}>${t ? `${usd(t)} or more` : "Any"}</option>`)
+        <label>${t("Minimum import value")} <select name="minValue">${THRESHOLDS
+          .map((v) => `<option value="${v}" ${v === minValue ? "selected" : ""}>${v ? t("{value} or more", { value: usd(v) }) : t("Any")}</option>`)
           .join("")}</select></label>
-        <label>Search <input name="search" type="search" placeholder="Code or description"></label>
+        <label>${t("Search")} <input name="search" type="search" placeholder="${t("Code or description")}"></label>
       </form>
     </div>
     <div class="panel">
-      <h2>Choice or structure?</h2>
-      <p>Tunisia's supplier concentration against the concentration of world exports of the same product, both
-        from BACI ${esc(data.year)}. Products high on the left depend on few suppliers although the world market
-        offers many. Products on the right are concentrated because few countries export them at all.
-        Bubble size follows import value.</p>
+      <h2>${t("Choice or structure?")}</h2>
+      <p>${t("Tunisia's supplier concentration against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.", { year: data.year })}</p>
       <div class="chart tall" id="quadrant"></div>
     </div>
-    <div class="panel"><h2>${rows.length.toLocaleString("en")} products</h2><div id="products"></div></div>
+    <div class="panel"><h2>${rows.length === 1 ? t("1 product") : t("{count} products", { count: count(rows.length) })}</h2><div id="products"></div></div>
   `));
 
   const form = root.querySelector("form");
@@ -57,15 +53,15 @@ export default async function overview(root, _, params) {
     selectableRows: false,
     initialSort: [{ column: "total", dir: "desc" }],
     columns: [
-      { title: "Code", field: "code", width: 90, cssClass: "code" },
-      { title: "Product", field: "description", minWidth: 240, formatter: "plaintext", tooltip: true },
-      usdColumn("Imports", "total", { width: 110 }),
-      { title: "Suppliers", field: "suppliers", hozAlign: "right", sorter: "number", width: 100 },
-      { title: "Largest supplier", field: "top", width: 150 },
-      pctColumn("Its share", "topShare", { width: 100 }),
-      pctColumn("Top 3", "top3", { width: 90 }),
-      indexColumn("HHI", "hhi", { width: 90 }),
-      indexColumn("World HHI", "worldHhi", { width: 110 }),
+      { title: t("Code"), field: "code", width: 90, cssClass: "code" },
+      { title: t("Product"), field: "description", minWidth: 240, formatter: "plaintext", tooltip: true },
+      usdColumn(t("Imports"), "total", { width: 120 }),
+      { title: t("Suppliers"), field: "suppliers", hozAlign: "right", sorter: "number", width: 110 },
+      { title: t("Largest supplier"), field: "top", width: 160 },
+      pctColumn(t("Its share"), "topShare", { width: 100 }),
+      pctColumn(t("Top 3"), "top3", { width: 90 }),
+      indexColumn(t("HHI"), "hhi", { width: 90 }),
+      indexColumn(t("World HHI"), "worldHhi", { width: 120 }),
     ],
   });
   grid.on("rowClick", (_, row) => (location.hash = `#/product/${row.getData().code}?year=${data.year}`));
@@ -79,11 +75,11 @@ export default async function overview(root, _, params) {
     grid: { left: 60, right: 30, top: 30, bottom: 55 },
     tooltip: {
       formatter: ({ data: [x, y, , r] }) => `<b>${esc(r.code)}</b> ${esc(r.description)}<br>
-        Imports ${usd(r.total)}, largest supplier ${esc(r.top)} (${pct(r.topShare)})<br>
-        Tunisia HHI ${index(y)}, world HHI ${index(x)}, largest exporter ${esc(r.worldTop)}`,
+        ${t("Imports {value}, largest supplier {name} ({share})", { value: usd(r.total), name: esc(r.top), share: pct(r.topShare) })}<br>
+        ${t("Tunisia HHI {tunisia}, world HHI {world}, largest exporter {name}", { tunisia: index(y), world: index(x), name: esc(r.worldTop) })}`,
     },
-    xAxis: { ...axis(), name: "World exporter HHI", nameLocation: "middle", nameGap: 32, min: 0, max: 1 },
-    yAxis: { ...axis(), name: "Tunisia supplier HHI", nameLocation: "middle", nameGap: 42, min: 0, max: 1 },
+    xAxis: { ...axis(), name: t("World exporter HHI"), nameLocation: "middle", nameGap: 32, min: 0, max: 1 },
+    yAxis: { ...axis(), name: t("Tunisia supplier HHI"), nameLocation: "middle", nameGap: 42, min: 0, max: 1 },
     series: [{
       type: "scatter",
       data: rows.filter((r) => r.hhi != null && r.worldHhi != null).map((r) => [r.worldHhi, r.hhi, r.total, r]),
@@ -101,8 +97,8 @@ export default async function overview(root, _, params) {
         itemStyle: { color: "transparent" },
         label: { color: css("--muted"), fontSize: 12 },
         data: [
-          [{ name: "Few suppliers, open world market", coord: [0, 1], label: { position: "insideTopLeft" } }, { coord: [HIGH, HIGH] }],
-          [{ name: "Few suppliers, few exporters", coord: [HIGH, 1], label: { position: "insideTopRight" } }, { coord: [1, HIGH] }],
+          [{ name: t("Few suppliers, open world market"), coord: [0, 1], label: { position: "insideTopLeft" } }, { coord: [HIGH, HIGH] }],
+          [{ name: t("Few suppliers, few exporters"), coord: [HIGH, 1], label: { position: "insideTopRight" } }, { coord: [1, HIGH] }],
         ],
       },
     }],

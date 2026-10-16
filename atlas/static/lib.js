@@ -1,4 +1,20 @@
+import { TABULATOR_LANGS, lang, t } from "./i18n.js";
+
 export const state = { snapshots: [], snapshot: null, detail: null };
+
+// BACI names countries in English. Other languages get the browser's own name for the alpha-2 code.
+const regionNames = lang === "en" ? null : new Intl.DisplayNames(lang, { type: "region" });
+let alpha2 = new Map();
+
+function localize(value) {
+  if (Array.isArray(value)) value.forEach(localize);
+  else if (value && typeof value === "object") {
+    const code = value.iso2 ?? alpha2.get(value.countryCode);
+    if (code && typeof value.countryName === "string") value.countryName = regionNames.of(code);
+    Object.values(value).forEach(localize);
+  }
+  return value;
+}
 
 export async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
@@ -7,26 +23,34 @@ export async function api(path, options = {}) {
     const detail = typeof body.detail === "string" ? body.detail : body.detail?.[0]?.msg;
     throw new Error(detail ?? `${response.status} ${response.statusText}`);
   }
-  return response.json();
+  const body = await response.json();
+  return regionNames ? localize(body) : body;
 }
 
 export const query = (params) =>
   new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")).toString();
 
 export async function snapshotDetail() {
-  if (state.detail?._id !== state.snapshot._id) state.detail = await api(`/snapshots/${state.snapshot._id}`);
+  if (state.detail?._id !== state.snapshot._id) {
+    state.detail = await api(`/snapshots/${state.snapshot._id}`);
+    alpha2 = new Map(state.detail.countries.map((c) => [c.countryCode, c.iso2]));
+  }
   return state.detail;
 }
 
-const compactUsd = new Intl.NumberFormat("en", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
-const fullUsd = new Intl.NumberFormat("en", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-const tonnes = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
+const compactUsd = new Intl.NumberFormat(lang, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
+const fullUsd = new Intl.NumberFormat(lang, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const tonnes = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
+const percent = [0, 1, 2].map((d) => new Intl.NumberFormat(lang, { style: "percent", minimumFractionDigits: d, maximumFractionDigits: d }));
+const hhi = new Intl.NumberFormat(lang, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+const whole = new Intl.NumberFormat(lang);
 
-export const usd = (v) => (v == null ? "n/a" : compactUsd.format(v));
-export const usdFull = (v) => (v == null ? "n/a" : fullUsd.format(v));
-export const pct = (v, digits = 1) => (v == null ? "n/a" : `${(v * 100).toFixed(digits)}%`);
-export const index = (v) => (v == null ? "n/a" : v.toFixed(3));
-export const tons = (v) => (v == null ? "n/a" : `${tonnes.format(v)} t`);
+export const usd = (v) => (v == null ? t("n/a") : compactUsd.format(v));
+export const usdFull = (v) => (v == null ? t("n/a") : fullUsd.format(v));
+export const pct = (v, digits = 1) => (v == null ? t("n/a") : percent[digits].format(v));
+export const index = (v) => (v == null ? t("n/a") : hhi.format(v));
+export const tons = (v) => (v == null ? t("n/a") : `${tonnes.format(v)} t`);
+export const count = (v) => whole.format(v);
 
 const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => entities[c]);
@@ -67,7 +91,7 @@ export const axis = () => ({
 });
 
 export function table(node, options) {
-  return new Tabulator(node, { layout: "fitColumns", pagination: true, paginationSize: 25, ...options });
+  return new Tabulator(node, { layout: "fitColumns", pagination: true, paginationSize: 25, locale: lang, langs: TABULATOR_LANGS, ...options });
 }
 
 // Tabulator guesses a sorter from the data and compares these as text, so 67.8M lands above 235M.

@@ -64,6 +64,11 @@ code, .code { font-family: var(--mono); font-size: 0.9em; }
 
 .snapshot { color: var(--muted); font-size: 0.8rem; display: flex; gap: 0.5rem; align-items: center; }
 
+.lang { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.lang button { border: 0; border-radius: 0; padding: 0.3rem 0.55rem; font-size: 0.75rem; letter-spacing: 0.06em; color: var(--muted); }
+.lang button + button { border-left: 1px solid var(--line); }
+.lang button.active { background: var(--ink); color: #fff; }
+
 main { max-width: 1240px; margin: 0 auto; padding: 2.5rem 2rem 1.5rem; }
 
 .head { margin-bottom: 2rem; }
