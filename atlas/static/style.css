@@ -167,7 +167,7 @@ dl.facts dd { margin: 0; word-break: break-word; }
 .tabulator-row { border-bottom: 1px solid var(--line); }
 .tabulator-row.tabulator-row-even { background: var(--surface); }
 .tabulator-row.tabulator-selectable:hover { background: var(--accent-soft); cursor: pointer; }
-.tabulator-row.untapped .tabulator-cell[tabulator-field="tunisia"] { color: var(--warn); font-weight: 600; }
+.tabulator-row.untapped .tabulator-cell[tabulator-field="reporter"] { color: var(--warn); font-weight: 600; }
 .tabulator .tabulator-footer { background: var(--surface); color: var(--muted); border-top: 0; }
 .tabulator .tabulator-footer .tabulator-page { color: var(--ink); background: var(--surface); border-radius: var(--radius); }
 .tabulator .tabulator-footer .tabulator-page.active { color: var(--warn); font-weight: 600; }
@@ -177,9 +177,14 @@ dl.facts dd { margin: 0; word-break: break-word; }
   section[aria-busy="true"]:empty::before { animation-duration: 2.4s, 0.2s; }
 }
 
+@media (max-width: 1280px) {
+  .top { flex-wrap: wrap; gap: 0.5rem 1rem; }
+  .top nav { order: 3; flex-basis: 100%; overflow-x: auto; }
+}
+
 @media (max-width: 720px) {
-  .top { flex-wrap: wrap; gap: 0.5rem 1rem; padding: 0.7rem 1rem; }
-  .top nav { order: 3; flex-basis: 100%; overflow-x: auto; gap: 1.1rem; }
+  .top { padding: 0.7rem 1rem; }
+  .top nav { gap: 1.1rem; }
   main { padding: 1.5rem 1rem 1rem; }
   h1 { font-size: 2rem; }
   .grid { grid-template-columns: minmax(0, 1fr); }

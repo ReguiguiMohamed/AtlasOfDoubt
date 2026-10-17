@@ -1,0 +1,194 @@
+import json
+from decimal import Decimal
+
+import pytest
+
+from atlas import materialize
+from atlas.prepare import DATA, PrepareFailed, prepare, read_gdp
+
+FLOWS = {
+    2012: [
+        "2012,251,788,010121,60,1.5",
+        "2012,380,788,010121,30,",
+        "2012,842,788,010121,10,NA",
+        "2012,251,380,010121,100,4",
+        "2012,788,251,010121,5,0.1",
+        "2012,842,788,100119,1,1",
+        "2012,842,788,100119,2,2",
+        "2012,999,788,100119,7,1",
+        "2012,251,788,999999,7,1",
+        "2012,251,788,310230,2.734,0.044",
+    ],
+    2015: ["2015,251,788,100119,1.5,3"],
+}
+
+
+def cached(db, snapshot, country, code, year):
+    generation = materialize.ensure(db, snapshot, country)
+    return db.country_product_years.find_one({"generationId": generation, "productCode": code, "year": year})
+
+
+def suppliers(db, snapshot, code, year):
+    return {s["countryCode"]: s for s in cached(db, snapshot, 788, code, year)["imports"]["suppliers"]}
+
+
+def test_preparing_twice_creates_no_duplicates(db, make_archive):
+    path = make_archive(FLOWS)
+    first = prepare(path, db)
+    second = prepare(path, db)
+    assert first["_id"] == second["_id"]
+    assert first["_id"].startswith("BACI_HS12_V202601@")
+    assert second["status"] == "ready"
+    assert db.world_product_years.count_documents({}) == 3
+    assert db.products.count_documents({}) == 3
+    assert db.snapshots.count_documents({}) == 1
+
+
+def test_leading_zeros_survive(db, make_archive):
+    snapshot = prepare(make_archive(FLOWS), db)
+    assert cached(db, snapshot, 788, "010121", 2012)
+    assert db.products.find_one({"productCode": "010121"})["chapter"] == "01"
+
+
+def test_values_are_converted_from_thousands_of_usd_exactly(db, make_archive):
+    snapshot = prepare(make_archive(FLOWS), db)
+    assert suppliers(db, snapshot, "010121", 2012)[251]["valueUsd"] == Decimal(60000)
+    assert suppliers(db, snapshot, "310230", 2012)[251]["valueUsd"] == Decimal(2734)
+    assert suppliers(db, snapshot, "310230", 2012)[251]["quantityTonnes"] == Decimal("0.044")
+
+
+def test_missing_quantity_stays_missing(db, make_archive):
+    horses = suppliers(db, prepare(make_archive(FLOWS), db), "010121", 2012)
+    assert horses[380]["quantityTonnes"] is None
+    assert horses[842]["quantityTonnes"] is None
+    assert horses[380]["valueUsd"] == Decimal(30000)
+
+
+def test_untrusted_rows_go_to_the_error_report(db, make_archive):
+    snapshot = prepare(make_archive(FLOWS), db)
+    assert snapshot["errors"]["byKind"] == {
+        "duplicate flow key": 2,
+        "unknown country code": 1,
+        "unknown product code": 1,
+    }
+    assert cached(db, snapshot, 788, "100119", 2012) is None
+
+
+def test_each_broken_row_is_named_with_its_line(db, make_archive):
+    rows = [
+        "2012,251,788,010121,60,1.5",
+        "2012,251",
+        "2012,380,788,010121,lots,1",
+        "2013,842,788,010121,1,1",
+        "2012,842,788,100119,0,1",
+        "2012,842,788,310230,1.0005,x",
+    ]
+    snapshot = prepare(make_archive({2012: rows}), db)
+    assert snapshot["errors"]["byKind"] == {
+        "malformed row": 1,
+        "malformed number": 1,
+        "year does not match file": 1,
+        "non-positive value": 1,
+    }
+    assert [(s["line"], s["kind"]) for s in snapshot["errors"]["samples"]] == [
+        (3, "malformed row"),
+        (4, "malformed number"),
+        (5, "year does not match file"),
+        (6, "non-positive value"),
+    ]
+    [year] = [f for f in snapshot["files"] if f["name"].startswith("BACI_HS12_Y2012")]
+    assert (year["rows"], year["flows"], year["roundedValues"], year["unreadableQuantities"]) == (6, 2, 1, 1)
+    assert suppliers(db, snapshot, "310230", 2012)[842]["valueUsd"] == Decimal(1001)
+
+
+def test_metrics_and_world_comparison_leave_the_reporter_out(db, make_archive):
+    doc = cached(db, prepare(make_archive(FLOWS), db), 788, "010121", 2012)
+    assert doc["imports"]["metrics"]["hhi"] == Decimal("0.46")
+    world = doc["imports"]["world"]
+    assert world["totalUsd"] == Decimal(200000)
+    assert world["hhi"] == Decimal(160**2 + 30**2 + 10**2) / 200**2
+    assert world["topSupplier"]["countryName"] == "France"
+    assert 788 not in [e["countryCode"] for e in world["topExporters"]]
+
+
+def test_exports_carry_rca_unit_value_and_coverage(db, make_archive):
+    snapshot = prepare(make_archive(FLOWS), db)
+    horses = cached(db, snapshot, 251, "010121", 2012)["exports"]
+    assert horses["totalUsd"] == Decimal(160000)
+    assert horses["quantityValidValueUsd"] == Decimal(160000)
+    assert horses["unitValueUsdPerTonne"] == Decimal(160000) / Decimal("5.5")
+    assert float(horses["rca"]) == pytest.approx((160000 / 162734) / (205000 / 207734))
+    usa = cached(db, snapshot, 842, "010121", 2012)["exports"]
+    assert (usa["quantityCoverage"], usa["unitValueUsdPerTonne"]) == (0, None)
+    assert "partial quantities" in usa["qualityFlags"]
+    france = db.country_years.find_one({"countryCode": 251, "year": 2012})
+    assert france["exportsUsd"] == Decimal(162734)
+    assert [d["countryCode"] for d in france["destinations"]] == [380, 788]
+
+
+def test_snapshot_records_provenance_counts_and_files(db, make_archive):
+    snapshot = prepare(make_archive(FLOWS), db)
+    assert len(snapshot["archive"]["sha256"]) == 64
+    assert snapshot["countries"][1] == {"countryCode": 156, "countryName": "China", "isoCode": "CHN", "iso2": "CH"}
+    assert snapshot["counts"] == {
+        "rows": 11,
+        "flows": 7,
+        "roundedValues": 0,
+        "unreadableQuantities": 0,
+        "dictionaryProducts": 3,
+        "countries": 6,
+    }
+    manifest = json.loads((DATA / snapshot["storage"]["path"] / "manifest.json").read_text())
+    assert sum(f["rows"] for f in manifest if f["path"].startswith("flows/")) == 7
+    assert snapshot["storage"]["files"] == len(manifest)
+    assert not list(DATA.glob("*.partial"))
+
+
+def test_missing_year_fails_the_snapshot(db, make_archive):
+    with pytest.raises(PrepareFailed, match="Y2020"):
+        prepare(make_archive(FLOWS, skip_year=2020), db)
+    assert db.snapshots.find_one()["status"] == "failed"
+    assert not list(DATA.glob("*.partial"))
+
+
+def test_another_archive_of_the_same_release_is_another_snapshot(db, make_archive):
+    first = prepare(make_archive(FLOWS), db)
+    second = prepare(make_archive({2012: ["2012,251,788,010121,1,1"]}), db)
+    assert first["_id"] != second["_id"]
+    assert db.snapshots.count_documents({"status": "ready"}) == 2
+
+
+def gdp_file(tmp_path, values):
+    meta = {"page": 1, "pages": 1, "per_page": 20000, "total": len(values), "lastupdated": "2026-10-08"}
+    rows = [
+        {"indicator": {"id": "NY.GDP.PCAP.PP.KD", "value": "GDP per capita, PPP"}, "countryiso3code": iso, "date": str(year), "value": value}
+        for iso, year, value in values
+    ]
+    path = tmp_path / "wdi-gdp.json"
+    path.write_text(json.dumps([meta, rows]))
+    return path
+
+
+def test_gdp_maps_iso3_codes_and_lists_what_it_left_out(tmp_path):
+    path = gdp_file(tmp_path, [("FRA", 2012, 40000.5), ("USA", 2012, None), ("AFE", 2012, 3000), ("ITA", 2013, -1)])
+    country_rows = [{"country_code": "251", "country_iso3": "FRA"}, {"country_code": "842", "country_iso3": "USA"}]
+    gdp, provenance = read_gdp(path, country_rows)
+    assert gdp == {251: {2012: Decimal("40000.5")}}
+    assert provenance["leftOut"] == ["AFE"]
+    assert provenance["countries"] == 1
+
+
+def test_prody_and_expy_use_same_year_income(db, make_archive, tmp_path):
+    incomes = {"FRA": 40000, "ITA": 30000, "USA": 60000, "TUN": 10000}
+    years = [(iso, year, gdp) for iso, gdp in incomes.items() for year in range(2012, 2025)]
+    snapshot = prepare(make_archive(FLOWS), db, gdp_file(tmp_path, years))
+    horses = db.world_product_years.find_one({"productCode": "010121", "year": 2012})
+    # Horses are 160/162.734 of France's exports and all of what Italy, the USA and Tunisia export.
+    france = Decimal(160000) / Decimal(162734)
+    expected = (france * 40000 + 30000 + 60000 + 10000) / (france + 3)
+    assert horses["prody"] == expected
+    assert horses["prodyCoverage"] == 1
+    italy = db.country_years.find_one({"countryCode": 380, "year": 2012})
+    assert italy["expy"]["value"] == expected
+    assert italy["expyFixed2012"]["value"] == expected
+    assert snapshot["gdp"]["countries"] == 4

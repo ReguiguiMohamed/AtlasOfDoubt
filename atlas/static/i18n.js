@@ -1,20 +1,15 @@
 // English text is the key, so a string missing here shows in English instead of breaking.
 const FR = {
-  "Overview": "Vue d'ensemble",
   "Product": "Produit",
   "Scenario": "Scénario",
   "Reports": "Rapports",
   "Snapshot": "Instantané",
   "n/a": "n.d.",
   "No snapshot yet": "Aucun instantané",
-  "Import a BACI release first:": "Importez d'abord une version de BACI :",
   "Data: {name} {classification}, release {release}, {unit}. {citation} Licence: {license}.":
     "Données : {name} {classification}, version {release}, {unit}. {citation} Licence : {license}.",
   "current USD, nominal": "USD courants, nominaux",
 
-  "Tunisian imports by supplier concentration, {year}": "Importations tunisiennes selon la concentration des fournisseurs, {year}",
-  "Each HS6 product Tunisia imported in {year}, with how much of its value came from the largest supplier, the three largest, and the Herfindahl-Hirschman index (0 to 1, where 1 means a single supplier). Click a product to investigate it.":
-    "Chaque produit SH6 importé par la Tunisie en {year}, avec la part de sa valeur venue du premier fournisseur, des trois premiers, et l'indice de Herfindahl-Hirschman (de 0 à 1, où 1 signifie un fournisseur unique). Cliquez sur un produit pour l'examiner.",
   "Year": "Année",
   "Minimum import value": "Valeur minimale importée",
   "{value} or more": "{value} ou plus",
@@ -22,8 +17,6 @@ const FR = {
   "Search": "Recherche",
   "Code or description": "Code ou libellé",
   "Choice or structure?": "Choix ou structure ?",
-  "Tunisia's supplier concentration against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.":
-    "La concentration des fournisseurs de la Tunisie face à celle des exportations mondiales du même produit, toutes deux tirées de BACI {year}. En haut à gauche, les produits dépendent de peu de fournisseurs alors que le marché mondial en offre beaucoup. À droite, ils sont concentrés parce que peu de pays les exportent. La taille des bulles suit la valeur importée.",
   "1 product": "1 produit",
   "{count} products": "{count} produits",
   "Code": "Code",
@@ -35,9 +28,7 @@ const FR = {
   "HHI": "IHH",
   "World HHI": "IHH mondial",
   "Imports {value}, largest supplier {name} ({share})": "Importations {value}, premier fournisseur {name} ({share})",
-  "Tunisia HHI {tunisia}, world HHI {world}, largest exporter {name}": "IHH Tunisie {tunisia}, IHH mondial {world}, premier exportateur {name}",
   "World exporter HHI": "IHH des exportateurs mondiaux",
-  "Tunisia supplier HHI": "IHH des fournisseurs de la Tunisie",
   "Few suppliers, open world market": "Peu de fournisseurs, marché mondial ouvert",
   "Few suppliers, few exporters": "Peu de fournisseurs, peu d'exportateurs",
   "Biggest shifts in concentration, {from} to {to}": "Plus fortes variations de concentration, de {from} à {to}",
@@ -52,37 +43,24 @@ const FR = {
   "Electrical machinery and equipment (chapter 85)": "Machines et appareils électriques (chapitre 85)",
   "Chapter": "Chapitre",
   "Heading": "Position",
-  "BACI records no imports of this code into Tunisia between {from} and {to}.":
-    "BACI n'enregistre aucune importation de ce code en Tunisie entre {from} et {to}.",
-  "Supplier values are summed across the group before shares and the HHI are computed.":
-    "Les valeurs des fournisseurs sont additionnées sur le groupe avant le calcul des parts et de l'IHH.",
-  "Gaps in the trend are years with no recorded flow into Tunisia.":
-    "Les trous de la tendance sont des années sans flux enregistré vers la Tunisie.",
   "Run a disruption scenario": "Simuler une rupture",
   "Top 3 share": "Part du top 3",
   "highly concentrated": "très concentré",
   "{name} leads world exports": "{name} mène les exportations mondiales",
   "Suppliers in {year}": "Fournisseurs en {year}",
   "Where the supply comes from, {year}": "D'où vient l'offre, {year}",
-  "Shaded by share of Tunisia's imports, with Tunisia in red. Very small countries do not show at this scale and are listed in the table.":
-    "Teinte selon la part des importations tunisiennes, la Tunisie en rouge. Les très petits pays n'apparaissent pas à cette échelle et figurent dans le tableau.",
   "Supplier table": "Tableau des fournisseurs",
   "Imports and concentration, {from} to {to}": "Importations et concentration, de {from} à {to}",
   "Shares of the five largest suppliers over time": "Parts des cinq premiers fournisseurs dans le temps",
   "Products in this group": "Produits de ce groupe",
   "Who else sells it, {year}": "Qui d'autre le vend, {year}",
-  "The largest exporters of this product worldwide, against what each sent Tunisia. A large exporter that sends little is a supplier Tunisia could turn to.":
-    "Les premiers exportateurs mondiaux de ce produit, face à ce que chacun a envoyé à la Tunisie. Un grand exportateur qui envoie peu est un fournisseur vers lequel la Tunisie pourrait se tourner.",
   "Share of world exports": "Part des exportations mondiales",
-  "Share of Tunisia's imports": "Part des importations tunisiennes",
   "{count} others": "{count} autres",
   "Country": "Pays",
   "ISO": "ISO",
   "Share": "Part",
   "Tonnes": "Tonnes",
   "no recorded flow": "aucun flux enregistré",
-  "Tunisia HHI": "IHH Tunisie",
-  "Years imported": "Années d'importation",
   "{count} of {total}": "{count} sur {total}",
   "Investigate a product": "Examiner un produit",
   "Search by HS code (2, 4 or 6 digits) or by words in the description. A 2 or 4 digit code opens the whole chapter or heading.":
@@ -92,29 +70,17 @@ const FR = {
   "Type at least two characters": "Saisissez au moins deux caractères",
 
   "Countries": "Pays",
-  "Pick a country to see what it sends Tunisia, how much of Tunisia's imports it carries, and the products where it leads.":
-    "Choisissez un pays pour voir ce qu'il fournit à la Tunisie, quelle part des importations tunisiennes il assure et les produits où il est en tête.",
   // French elides "de" before a vowel, so these sentences name the country without a preposition.
-  "BACI records no exports from {name} to Tunisia between {from} and {to}.":
-    "{name} : BACI n'enregistre aucune exportation vers la Tunisie entre {from} et {to}.",
-  "Everything Tunisia imported from {name}, product by product. Share and rank are measured among each product's suppliers.":
-    "Tout ce que la Tunisie a importé de ce pays, produit par produit. La part et le rang se mesurent parmi les fournisseurs de chaque produit.",
   "Simulate losing this supplier": "Simuler la perte de ce fournisseur",
-  "Supplied to Tunisia": "Fourni à la Tunisie",
   "Products": "Produits",
   "Products it leads": "Produits où il est en tête",
   "{count} as sole supplier": "{count} comme fournisseur unique",
-  "Supplies to Tunisia, {from} to {to}": "Livraisons à la Tunisie, de {from} à {to}",
   "Products from {name}, {year}": "{name} : produits fournis en {year}",
-  "Sort by share to find the products where Tunisia depends most on {name}.":
-    "Triez par part pour trouver les produits où la Tunisie dépend le plus de ce pays.",
   "Supplied": "Fourni",
   "Rank": "Rang",
 
   "Historical import value exposed under this scenario": "Valeur historique d'importation exposée dans ce scénario",
   "Disruption scenario": "Scénario de rupture",
-  "Cut the imports from chosen suppliers by a percentage and see how much of Tunisia's historical import value sits behind them. Other suppliers are left as they were, with no replacement and no price response.":
-    "Réduisez d'un pourcentage les importations venant des fournisseurs choisis et voyez quelle part de la valeur historique des importations tunisiennes en dépend. Les autres fournisseurs restent inchangés, sans substitution ni effet prix.",
   "One product": "Un produit",
   "Supplier countries": "Pays fournisseurs",
   "HS code": "Code SH",
@@ -124,7 +90,6 @@ const FR = {
   "Enter an HS code to list its suppliers.": "Saisissez un code SH pour lister ses fournisseurs.",
   "Result": "Résultat",
   "Pick at least one supplier.": "Choisissez au moins un fournisseur.",
-  "No recorded imports of {code} into Tunisia in {year}.": "Aucune importation de {code} enregistrée en Tunisie en {year}.",
   "Report title": "Titre du rapport",
   "What this scenario asks": "La question posée par ce scénario",
   "Save evidence report": "Enregistrer le rapport",
@@ -138,7 +103,6 @@ const FR = {
   "Cut": "Réduit",
   "After": "Après",
   "Share after": "Part après",
-  "Share of all Tunisian imports": "Part de toutes les importations tunisiennes",
   "Products touched": "Produits touchés",
   "{name} supplied {value}": "{name} a fourni {value}",
   "Products with the most value exposed": "Produits les plus exposés en valeur",
@@ -151,7 +115,6 @@ const FR = {
   "HHI before": "IHH avant",
   "HHI after": "IHH après",
 
-  "Evidence reports": "Rapports archivés",
   "Each report freezes a scenario, its result and the exact BACI archive it came from. Reports are never recalculated, so a newer release leaves them as they were saved.":
     "Chaque rapport fige un scénario, son résultat et l'archive BACI exacte dont il provient. Un rapport n'est jamais recalculé, et une nouvelle version des données le laisse tel qu'il a été enregistré.",
   "No reports yet. Save one from the scenario explorer.": "Aucun rapport pour l'instant. Enregistrez-en un depuis l'explorateur de scénarios.",
@@ -188,12 +151,9 @@ const FR = {
 
   "Sea routes": "Routes maritimes",
   "Sea routes and chokepoints": "Routes maritimes et détroits",
-  "Each supplier country is given the usual sea lane to Tunis and the straits on it, so the value behind a strait is what a closure would put at risk. BACI does not record transport, so the routes are a model, not shipping data.":
-    "Chaque pays fournisseur reçoit la route maritime habituelle vers Tunis et les détroits qu'elle traverse, de sorte que la valeur derrière un détroit est ce qu'une fermeture mettrait en jeu. BACI n'enregistre pas le transport : les routes sont un modèle, pas des données de navigation.",
   "HS code, optional": "Code SH, facultatif",
   "Show": "Afficher",
   "HS {code}, {year}": "SH {code}, {year}",
-  "Routes to Tunisia, {year}": "Routes vers la Tunisie, {year}",
   "Line width follows the value carried and circles mark the straits. Hover for a summary, click for the detail below.":
     "L'épaisseur des lignes suit la valeur transportée et les cercles marquent les détroits. Survolez pour un résumé, cliquez pour le détail ci-dessous.",
   "Chokepoints compared, {year}": "Détroits comparés, {year}",
@@ -216,7 +176,6 @@ const FR = {
   "Imports through it": "Importations concernées",
   "Simulate a closure": "Simuler une fermeture",
   "Modelled lane: {via}.": "Route modélisée : {via}.",
-  "Modelled sea route to Tunisia: {route}, {via}.": "Route maritime modélisée vers la Tunisie : {route}, {via}.",
   "Strait of Gibraltar": "Détroit de Gibraltar",
   "Suez Canal": "Canal de Suez",
   "Bab el-Mandeb": "Bab el-Mandeb",
@@ -242,6 +201,63 @@ const FR = {
   "Zoom in": "Zoomer",
   "Zoom out": "Dézoomer",
   "Whole world": "Monde entier",
+  "Exports": "Exportations",
+  "Choose": "Choisir",
+  "Choose a country": "Choisissez un pays",
+  "Every page reads the trade of one country: who supplies its imports, where its exports go, and which sea routes carry them. Pick the country to start, and change it at any time from the header.": "Chaque page lit le commerce d'un pays : qui fournit ses importations, où vont ses exportations et quelles routes maritimes les portent. Choisissez le pays pour commencer, et changez-le à tout moment depuis l'en-tête.",
+  "Prepare a BACI release first:": "Préparez d'abord une version de BACI :",
+  "Imports of {reporter} by supplier concentration, {year}": "{reporter} : importations selon la concentration des fournisseurs, {year}",
+  "Each HS6 product {reporter} imported in {year}, with how much of its value came from the largest supplier, the three largest, and the Herfindahl-Hirschman index (0 to 1, where 1 means a single supplier). Click a product to investigate it.": "Chaque produit SH6 importé en {year} ({reporter}), avec la part de sa valeur venue du premier fournisseur, des trois premiers, et l'indice de Herfindahl-Hirschman (de 0 à 1, où 1 signifie un fournisseur unique). Cliquez sur un produit pour l'examiner.",
+  "Supplier concentration of {reporter} against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.": "{reporter} : concentration des fournisseurs face à celle des exportations mondiales du même produit, toutes deux tirées de BACI {year}. En haut à gauche, les produits dépendent de peu de fournisseurs alors que le marché mondial en offre beaucoup. À droite, ils sont concentrés parce que peu de pays les exportent. La taille des bulles suit la valeur importée.",
+  "Supplier HHI {hhi}, world HHI {world}, largest exporter {name}": "IHH des fournisseurs {hhi}, IHH mondial {world}, premier exportateur {name}",
+  "BACI records no imports of this code into {reporter} between {from} and {to}.": "{reporter} : BACI n'enregistre aucune importation de ce code entre {from} et {to}.",
+  "Gaps in the trend are years with no recorded flow into {reporter}.": "Les trous de la tendance sont des années sans flux enregistré ({reporter}).",
+  "Shaded by share of the imports of {reporter}, with {reporter} in red. Very small countries do not show at this scale and are listed in the table.": "Teinte selon la part des importations ({reporter}), le pays déclarant en rouge. Les très petits pays n'apparaissent pas à cette échelle et figurent dans le tableau.",
+  "The largest exporters of this product worldwide, against what each sent {reporter}. A large exporter that sends little is a supplier {reporter} could turn to.": "Les premiers exportateurs mondiaux de ce produit, face à ce que chacun a envoyé ({reporter}). Un grand exportateur qui envoie peu est un fournisseur vers lequel se tourner.",
+  "HS6 product {code}, in heading {heading} of chapter {chapter}.": "Produit SH6 {code}, dans la position {heading} du chapitre {chapter}.",
+  "Every HS6 product whose code starts with {code}. Supplier values are summed across the group before shares and the HHI are computed.": "Chaque produit SH6 dont le code commence par {code}. Les valeurs des fournisseurs sont additionnées sur le groupe avant le calcul des parts et de l'IHH.",
+  "Chapters, headings and products": "Chapitres, positions et produits",
+  "The Harmonized System files every good under a six digit code. The first two digits are its chapter, such as 10 for cereals. The first four are its heading, such as 1001 for wheat and meslin. All six are the product, such as 100119 for durum wheat other than seed, the finest level BACI records.": "Le Système harmonisé classe chaque marchandise sous un code à six chiffres. Les deux premiers donnent le chapitre, comme 10 pour les céréales. Les quatre premiers donnent la position, comme 1001 pour le froment et le méteil. Les six forment le produit, comme 100119 pour le blé dur autre que de semence, le niveau le plus fin que BACI enregistre.",
+  "Exports of {reporter}, {from} to {to}": "{reporter} : exportations, de {from} à {to}",
+  "Exports of {reporter}, {year}": "{reporter} : exportations, {year}",
+  "Revealed comparative advantage compares the share of this code in the exports of {reporter} with its share in world exports. Above 1, {reporter} exports relatively more of it than the world does.": "L'avantage comparatif révélé compare la part de ce code dans les exportations du pays ({reporter}) à sa part dans les exportations mondiales. Au-dessus de 1, le pays en exporte relativement plus que le monde.",
+  "RCA": "ACR",
+  "BACI records no trade between {name} and {reporter} from {from} to {to}.": "BACI n'enregistre aucun échange entre {name} et {reporter} de {from} à {to}.",
+  "Everything {reporter} imported from {name}, product by product. Share and rank are measured among each product's suppliers.": "Tout ce que {reporter} a importé de ce pays ({name}), produit par produit. La part et le rang se mesurent parmi les fournisseurs de chaque produit.",
+  "Modelled sea route to {reporter}: {route}, {via}.": "Route maritime modélisée vers {reporter} : {route}, {via}.",
+  "Share of all imports": "Part de toutes les importations",
+  "Bought back": "Acheté en retour",
+  "{share} of all exports": "{share} de toutes les exportations",
+  "Trade with {name}, {from} to {to}": "Échanges avec ce pays ({name}), de {from} à {to}",
+  "Sort by share to find the products where {reporter} depends most on {name}.": "Triez par part pour trouver les produits où {reporter} dépend le plus de ce pays ({name}).",
+  "Partner countries": "Pays partenaires",
+  "Pick a partner to see what it supplies, how much of all imports it carries, the products where it leads, and what it buys back.": "Choisissez un partenaire pour voir ce qu'il fournit, quelle part de toutes les importations il assure, les produits où il est en tête et ce qu'il achète en retour.",
+  "Cut the imports from chosen suppliers by a percentage and see how much of the historical import value of {reporter} sits behind them. Other suppliers are left as they were, with no replacement and no price response.": "Réduisez d'un pourcentage les importations venant des fournisseurs choisis et voyez quelle part de la valeur historique importée ({reporter}) en dépend. Les autres fournisseurs restent tels quels, sans remplacement ni réaction des prix.",
+  "No recorded imports of {code} into {reporter} in {year}.": "{reporter} : aucune importation de {code} enregistrée en {year}.",
+  "Evidence reports, {reporter}": "Rapports archivés, {reporter}",
+  "Each supplier country is given the usual sea lane to {reporter} and the straits on it, so the value behind a strait is what a closure would put at risk. BACI does not record transport, so the routes are a model, not shipping data.": "Chaque pays fournisseur reçoit la route maritime habituelle vers le pays déclarant ({reporter}) et les détroits qu'elle traverse, de sorte que la valeur derrière un détroit est ce qu'une fermeture mettrait en jeu. BACI n'enregistre pas le transport : les routes sont un modèle, pas des données de navigation.",
+  "Routes to {reporter}, {year}": "Routes vers {reporter}, {year}",
+  "Where the exports of {reporter} go, how concentrated they are by product and by destination, and how sophisticated the basket is by the income of the countries that export the same goods.": "{reporter} : où vont les exportations, leur concentration par produit et par destination, et la sophistication du panier selon le revenu des pays qui exportent les mêmes biens.",
+  "Minimum export value": "Valeur d'exportation minimale",
+  "Destinations": "Destinations",
+  "Product HHI": "IHH des produits",
+  "Destination HHI": "IHH des destinations",
+  "EXPY": "EXPY",
+  "GDP per capita, PPP": "PIB par habitant, PPA",
+  "Exports and concentration, {from} to {to}": "Exportations et concentration, de {from} à {to}",
+  "The HHI runs from 0 to 1, where 1 means a single product or a single destination.": "L'IHH va de 0 à 1, où 1 signifie un seul produit ou une seule destination.",
+  "Export sophistication, {from} to {to}": "Sophistication des exportations, de {from} à {to}",
+  "EXPY weights each product by PRODY, the income per head of the countries that export it, in constant PPP dollars. The fixed line keeps the 2012 PRODY, so it moves only when the basket changes. A year shows no value when a product in the basket lacks a PRODY.": "L'EXPY pondère chaque produit par son PRODY, le revenu par habitant des pays qui l'exportent, en dollars PPA constants. La ligne fixe garde le PRODY de 2012 et ne bouge donc que lorsque le panier change. Une année reste vide quand un produit du panier n'a pas de PRODY.",
+  "EXPY at 2012 PRODY": "EXPY au PRODY de 2012",
+  "Destinations, {year}": "Destinations, {year}",
+  "Destination table": "Tableau des destinations",
+  "RCA above 1 means {reporter} exports relatively more of the product than the world does. The unit value is only read as a price when no quality flag is raised.": "Un ACR au-dessus de 1 signifie que le pays ({reporter}) exporte relativement plus de ce produit que le monde. La valeur unitaire ne se lit comme un prix qu'en l'absence d'alerte de qualité.",
+  "World share": "Part mondiale",
+  "Unit value per tonne": "Valeur unitaire par tonne",
+  "Quality flags": "Alertes de qualité",
+  "partial quantities": "quantités partielles",
+  "tiny quantity": "quantité infime",
+  "extreme unit value": "valeur unitaire extrême",
 };
 
 const LANGS = ["en", "fr"];
@@ -267,7 +283,9 @@ export function switchLang(next) {
   try {
     localStorage.setItem("lang", next);
   } catch {}
-  location.assign(`${location.pathname}?lang=${next}${location.hash}`);
+  const search = new URLSearchParams(location.search);
+  search.set("lang", next);
+  location.assign(`${location.pathname}?${search}${location.hash}`);
 }
 
 export const TABULATOR_LANGS = {

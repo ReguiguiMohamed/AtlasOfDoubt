@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctColumn, query, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
 
 // 0.25 is where the 2010 US Horizontal Merger Guidelines start calling a market highly concentrated (HHI 2500 of 10000).
 const HIGH = 0.25;
@@ -7,10 +7,11 @@ const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 
 export default async function overview(root, _, params) {
   const minValue = Number(params.get("minValue") ?? 1_000_000);
-  const data = await api(`/overview?${query({ snapshot: state.snapshot._id, year: params.get("year"), minValue })}`);
+  const data = await api(`/overview?${scoped({ year: params.get("year"), minValue })}`);
   const earlier = state.snapshot.years.filter((y) => y < data.year);
   const from = earlier.includes(Number(params.get("from"))) ? Number(params.get("from")) : earlier[0];
-  const moved = from && await api(`/movers?${query({ snapshot: state.snapshot._id, from, to: data.year, minValue })}`);
+  const moved = from && await api(`/movers?${scoped({ from, to: data.year, minValue })}`);
+  const reporter = esc(state.reporter.countryName);
   const rows = data.rows.map((r) => ({
     code: r.productCode,
     description: r.description,
@@ -26,8 +27,8 @@ export default async function overview(root, _, params) {
 
   root.append(html(`
     <div class="head">
-      <h1>${t("Tunisian imports by supplier concentration, {year}", { year: data.year })}</h1>
-      <p class="lede">${t("Each HS6 product Tunisia imported in {year}, with how much of its value came from the largest supplier, the three largest, and the Herfindahl-Hirschman index (0 to 1, where 1 means a single supplier). Click a product to investigate it.", { year: data.year })}</p>
+      <h1>${t("Imports of {reporter} by supplier concentration, {year}", { reporter, year: data.year })}</h1>
+      <p class="lede">${t("Each HS6 product {reporter} imported in {year}, with how much of its value came from the largest supplier, the three largest, and the Herfindahl-Hirschman index (0 to 1, where 1 means a single supplier). Click a product to investigate it.", { reporter, year: data.year })}</p>
       <form class="controls">
         <label>${t("Year")} <select name="year">${state.snapshot.years
           .map((y) => `<option ${y === data.year ? "selected" : ""}>${y}</option>`).reverse().join("")}</select></label>
@@ -39,7 +40,7 @@ export default async function overview(root, _, params) {
     </div>
     <div class="panel">
       <h2>${t("Choice or structure?")}</h2>
-      <p>${t("Tunisia's supplier concentration against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.", { year: data.year })}</p>
+      <p>${t("Supplier concentration of {reporter} against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.", { reporter, year: data.year })}</p>
       <div class="chart tall" id="quadrant"></div>
     </div>
     ${moved ? `<div class="panel">
@@ -86,10 +87,10 @@ export default async function overview(root, _, params) {
     tooltip: {
       formatter: ({ data: [x, y, , r] }) => `<b>${esc(r.code)}</b> ${esc(r.description)}<br>
         ${t("Imports {value}, largest supplier {name} ({share})", { value: usd(r.total), name: esc(r.top), share: pct(r.topShare) })}<br>
-        ${t("Tunisia HHI {tunisia}, world HHI {world}, largest exporter {name}", { tunisia: index(y), world: index(x), name: esc(r.worldTop) })}`,
+        ${t("Supplier HHI {hhi}, world HHI {world}, largest exporter {name}", { hhi: index(y), world: index(x), name: esc(r.worldTop) })}`,
     },
     xAxis: { ...axis(), name: t("World exporter HHI"), nameLocation: "middle", nameGap: 32, min: 0, max: 1 },
-    yAxis: { ...axis(), name: t("Tunisia supplier HHI"), nameLocation: "middle", nameGap: 42, min: 0, max: 1 },
+    yAxis: { ...axis(), name: t("Supplier HHI"), nameLocation: "middle", nameGap: 42, min: 0, max: 1 },
     series: [{
       type: "scatter",
       data: rows.filter((r) => r.hhi != null && r.worldHhi != null).map((r) => [r.worldHhi, r.hhi, r.total, r]),

@@ -1,11 +1,12 @@
 import { t } from "../i18n.js";
-import { TUNISIA, api, axis, chart, count, css, esc, html, kpi, loadWorld, pct, pctColumn, query, shapeId, state, table, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, usd, usdColumn, zoomable } from "../lib.js";
 
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export default async function seaRoutes(root, _, params) {
   const code = params.get("code") ?? "";
-  const data = await api(`/routes?${query({ snapshot: state.snapshot._id, year: params.get("year"), code })}`);
+  const data = await api(`/routes?${scoped({ year: params.get("year"), code })}`);
+  const reporter = esc(state.reporter.countryName);
   const strait = Object.fromEntries(data.chokepoints.map((c) => [c.id, c]));
   const items = [...data.chokepoints, ...data.routes];
   const via = (r) => (r.via?.length ? r.via.map((id) => t(strait[id].name)).join(" → ") : t("no chokepoint"));
@@ -16,7 +17,7 @@ export default async function seaRoutes(root, _, params) {
   root.append(html(`
     <div class="head">
       <h1>${t("Sea routes and chokepoints")}</h1>
-      <p class="lede">${t("Each supplier country is given the usual sea lane to Tunis and the straits on it, so the value behind a strait is what a closure would put at risk. BACI does not record transport, so the routes are a model, not shipping data.")}</p>
+      <p class="lede">${t("Each supplier country is given the usual sea lane to {reporter} and the straits on it, so the value behind a strait is what a closure would put at risk. BACI does not record transport, so the routes are a model, not shipping data.", { reporter })}</p>
       <form class="controls">
         <label>${t("Year")} <select name="year">${state.snapshot.years
           .map((y) => `<option ${y === data.year ? "selected" : ""}>${y}</option>`).reverse().join("")}</select></label>
@@ -29,7 +30,7 @@ export default async function seaRoutes(root, _, params) {
       ${kpi(t("Imports"), usd(data.totalUsd), code ? t("HS {code}, {year}", { code, year: data.year }) : String(data.year))}
       ${ranked.slice(0, 4).map((c) => kpi(t(c.name), pct(c.share), usd(c.valueUsd))).join("")}
     </div>
-    <div class="panel" id="where"><h2>${t("Routes to Tunisia, {year}", { year: data.year })}</h2>
+    <div class="panel" id="where"><h2>${t("Routes to {reporter}, {year}", { reporter, year: data.year })}</h2>
       <p>${t("Line width follows the value carried and circles mark the straits. Hover for a summary, click for the detail below.")}</p>
       <div class="chart map" id="map"></div></div>
     <div class="panel" id="detail"></div>
@@ -65,7 +66,7 @@ export default async function seaRoutes(root, _, params) {
       itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
       regions: [
         ...selected.countries.map((c) => ({ name: shapeId(c.countryCode), itemStyle: { areaColor: css("--supply-soft") } })),
-        { name: TUNISIA, itemStyle: { areaColor: css("--warn") } },
+        { name: shapeId(state.reporter.countryCode), itemStyle: { areaColor: css("--warn") } },
       ],
     },
     series: [
@@ -232,7 +233,7 @@ export default async function seaRoutes(root, _, params) {
     const ticket = ++asked;
     const preview = await api("/scenarios/preview", {
       method: "POST",
-      body: JSON.stringify({ snapshot: state.snapshot._id, year: data.year, mode: "country", suppliers, reduction: 1 }),
+      body: JSON.stringify({ snapshot: state.snapshot._id, reporter: state.reporter.countryCode, year: data.year, mode: "country", suppliers, reduction: 1 }),
     });
     if (ticket !== asked || !detail.isConnected) return;
     const products = preview.result.products.filter((p) => p.productCode.startsWith(code));

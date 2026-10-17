@@ -1,15 +1,19 @@
 import os
+import tempfile
 import zipfile
 
 import pytest
 
-from atlas.db import connect
-from atlas.ingest import YEARS
-
+# Both are read when atlas is imported, so they are set first.
 os.environ["ATLAS_DB"] = "atlas_test"
+os.environ["ATLAS_DATA"] = tempfile.mkdtemp(prefix="atlas-test-")
+
+from atlas.db import connect
+from atlas.prepare import YEARS
 
 COUNTRIES = [
     ("4", "Afghanistan", "AFG"),
+    ("156", "China", "CHN"),
     ("251", "France", "FRA"),
     ("380", "Italy", "ITA"),
     ("788", "Tunisia", "TUN"),

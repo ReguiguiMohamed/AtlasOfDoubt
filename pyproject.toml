@@ -1,9 +1,10 @@
 [project]
 name = "atlas-of-doubt"
 version = "0.1.0"
-description = "Supplier concentration and disruption exposure of Tunisian imports, from CEPII BACI."
+description = "Supplier concentration, disruption exposure and export structure for any country, from CEPII BACI."
 requires-python = ">=3.12"
 dependencies = [
+    "duckdb==1.5.6",
     "fastapi==0.143.3",
     "pymongo==4.19.0",
     "uvicorn==0.54.0",

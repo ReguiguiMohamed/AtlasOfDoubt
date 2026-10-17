@@ -1,6 +1,6 @@
 import { TABULATOR_LANGS, lang, t } from "./i18n.js";
 
-export const state = { snapshots: [], snapshot: null, detail: null };
+export const state = { snapshots: [], snapshot: null, detail: null, reporter: null };
 
 // BACI names countries in English. Other languages get the browser's own name for the alpha-2 code.
 const regionNames = lang === "en" ? null : new Intl.DisplayNames(lang, { type: "region" });
@@ -30,6 +30,8 @@ export async function api(path, options = {}) {
 
 export const query = (params) =>
   new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")).toString();
+
+export const scoped = (params = {}) => query({ snapshot: state.snapshot._id, reporter: state.reporter.countryCode, ...params });
 
 export async function snapshotDetail() {
   if (state.detail?._id !== state.snapshot._id) {
@@ -112,6 +114,25 @@ export const pctColumn = numeric(pct);
 export const indexColumn = numeric(index);
 export const tonsColumn = numeric(tons);
 
+// Tabulator's own header filter waits for keyup, so pasted or autofilled text never filtered.
+export function countryPicker(node, countries, pick) {
+  node.append(html(`<div class="controls"><label>${t("Search")} <input type="search" placeholder="${t("Filter countries")}" autofocus></label></div><div></div>`));
+  const grid = table(node.lastElementChild, {
+    data: countries,
+    paginationSize: 20,
+    initialSort: [{ column: "countryName", dir: "asc" }],
+    columns: [
+      { title: t("Country"), field: "countryName" },
+      { title: t("ISO"), field: "isoCode", width: 90 },
+    ],
+  });
+  grid.on("rowClick", (_, row) => pick(row.getData()));
+  node.querySelector("input").addEventListener("input", (e) => {
+    const term = e.target.value.trim().toLowerCase();
+    grid.setFilter(term ? (c) => c.countryName.toLowerCase().includes(term) || c.isoCode?.toLowerCase() === term : []);
+  });
+}
+
 export const kpi = (label, value, note = "") =>
   `<div class="kpi"><span class="label">${esc(label)}</span><strong>${esc(value)}</strong>${note && `<span class="note">${esc(note)}</span>`}</div>`;
 
@@ -136,7 +157,6 @@ export function zoomable(instance, component) {
 
 const ATLAS = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json";
 const ATLAS_SRI = "sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf";
-export const TUNISIA = "788";
 // BACI keeps a few pre-ISO country codes where world-atlas uses the current ISO 3166 numeric ones.
 const ISO = { 251: 250, 490: 158, 579: 578, 699: 356, 757: 756, 842: 840 };
 export const shapeId = (code) => String(ISO[code] ?? code).padStart(3, "0");

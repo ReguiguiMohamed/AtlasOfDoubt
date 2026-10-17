@@ -2,36 +2,43 @@
 
 [![CI](https://github.com/ReguiguiMohamed/AtlasOfDoubt/actions/workflows/ci.yml/badge.svg)](https://github.com/ReguiguiMohamed/AtlasOfDoubt/actions/workflows/ci.yml)
 
-AtlasOfDoubt measures how few countries supply each product Tunisia imports, and how much a disruption at one of them would cost, from 13 years of CEPII BACI trade flows.
+AtlasOfDoubt measures, for any country, how few suppliers sell it each product it imports, where its exports go and how a disruption at one supplier would hit it, from 13 years of CEPII BACI trade flows.
 
 ![Product page for wheat, heading 1001, in 2024: imports, supplier count, top share, HHI and the world map of suppliers](docs/media/wheat.png)
 
-Tunisia imported $25.73B of goods in 2024. The 1,823 products worth at least $1M each made up $25.03B of it, and for 1,090 of them one supplier or a handful held most of the market, with a Herfindahl-Hirschman index (HHI) of 0.25 or more. Wheat is one: $653.7M from 17 countries, 45.4% of it from Russia and 79.0% from the top three.
+Pick a country and every page reads its trade. Tunisia, the first country studied, imported $25.73B of goods in 2024. The 1,823 products worth at least $1M each made up $25.03B of it, and for 1,090 of them one supplier or a handful held most of the market, with a Herfindahl-Hirschman index (HHI) of 0.25 or more. Wheat is one: $653.7M from 17 countries, 45.4% of it from Russia and 79.0% from the top three.
 
-A concentrated supplier list is a choice when the world market is open and a constraint when it is not. AtlasOfDoubt sets Tunisia's HHI for each product against the HHI of world exports of the same product. In 2024, 877 products worth $12.42B were concentrated in Tunisia while the world market was open, so other suppliers existed.
+A concentrated supplier list is a choice when the world market is open and a constraint when it is not. AtlasOfDoubt sets the reporter's HHI for each product against the HHI of world exports of the same product, with the reporter itself left out of the world side. On the export side it shows destinations, product and destination concentration, revealed comparative advantage, unit values with quality flags and EXPY, the income level of the basket.
 
 ## How it works
 
-1. **Import.** `python -m atlas.ingest` streams the 13 yearly files of a BACI release, keeps the 717,531 flows into Tunisia, and stores one document per product and year with its suppliers embedded and its measures computed.
-2. **Snapshot.** Every release lands under its own id, `BACI_HS12_V202601`, so a later release never changes numbers a report already cites.
-3. **Measure.** One module, `atlas/metrics.py`, computes totals, top share, top-3 share and HHI. The import, the API and saved reports all call it.
-4. **Explore.** A FastAPI server serves the API and a web app with an overview, product and supplier-country pages, the "Choice or structure?" quadrant, the biggest shifts in concentration since 2012 and a map of modelled sea routes with the value behind each strait. In 2024, $5.3B of the $25.7B Tunisia imported came from countries whose usual lane runs through Suez.
-5. **Stress test.** A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report with its source hash, a CSV export and a print layout.
+1. **Prepare.** `python -m atlas.prepare` checks the 13 yearly files of a BACI release in DuckDB, writes the valid flows once as Parquet partitioned by importer and year, and stores world totals, country-year summaries, RCA inputs and PRODY in MongoDB. An optional World Bank GDP file adds PRODY and EXPY.
+2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release or GDP file lands beside the old one without changing numbers a report already cites.
+3. **Materialize.** The first visit to a country builds its view from its own Parquet partition into MongoDB, as one generation that becomes readable only when complete. The least recently used countries are evicted past a 1 GB budget and rebuilt with the same figures.
+4. **Measure.** One module, `atlas/metrics.py`, computes totals, shares, HHI, RCA, PRODY, EXPY and the scenario. Preparation, the API and saved reports all call it.
+5. **Explore and stress test.** The web app shows imports, exports, products, partner countries and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
 
 ```mermaid
 flowchart LR
-    Zip[(BACI zip<br>1.27 GB)] -->|atlas.ingest| Mongo[(MongoDB<br>product_years)]
-    Mongo --> API[FastAPI<br>atlas.api]
+    Zip[(BACI zip<br>1.27 GB)] -->|atlas.prepare| Parquet[(Parquet<br>by importer, year)]
+    Zip -->|atlas.prepare| World[(MongoDB<br>world and country-year)]
+    Parquet -->|first visit| Cache[(MongoDB<br>one country's view)]
+    World --> Cache
+    Cache --> API[FastAPI<br>atlas.api]
     API --> Web[Web app<br>EN / FR]
     API --> Reports[(Reports<br>immutable)]
 ```
 
 ## Run it
 
-Both paths need the BACI archive in `data/raw/`:
+Both paths need the BACI archive in `data/raw/`, and the GDP file if you want EXPY:
 
 ```bash
 curl -L --create-dirs -o data/raw/BACI_HS12_V202601.zip https://www.cepii.fr/DATA_DOWNLOAD/baci/data/BACI_HS12_V202601.zip
+```
+
+```bash
+curl -o data/raw/wdi-gdp.json "https://api.worldbank.org/v2/country/all/indicator/NY.GDP.PCAP.PP.KD?format=json&date=2012:2024&per_page=20000"
 ```
 
 **With Docker**, nothing else to install:
@@ -41,10 +48,10 @@ docker compose up --build -d
 ```
 
 ```bash
-docker compose run --rm app python -m atlas.ingest data/raw/BACI_HS12_V202601.zip
+docker compose run --rm app python -m atlas.prepare data/raw/BACI_HS12_V202601.zip data/raw/wdi-gdp.json
 ```
 
-Then open http://localhost:8000. The import runs once and the data stays in the `mongo` volume.
+Then open http://localhost:8000. The Parquet files stay in `data/snapshots/` and the rest in the `mongo` volume.
 
 **Without Docker**, with Python 3.12 and MongoDB on port 27017:
 
@@ -53,43 +60,42 @@ pip install -e ".[dev]"
 ```
 
 ```bash
-python -m atlas.ingest data/raw/BACI_HS12_V202601.zip
+python -m atlas.prepare data/raw/BACI_HS12_V202601.zip data/raw/wdi-gdp.json
 ```
 
 ```bash
 uvicorn atlas.api:app
 ```
 
-`pytest -q` runs the tests against the same local MongoDB in a database of its own, `atlas_test`.
+A new release takes the same one command with its own archive. `pytest -q` runs the tests against the same local MongoDB in a database of its own, `atlas_test`.
 
 ## Results
 
 | Check | Result |
 | --- | --- |
-| Tests | 49 passed, CI run [38955478004](https://github.com/ReguiguiMohamed/AtlasOfDoubt/actions/runs/38955478004) in 38 s |
-| Full import in Docker | 17 min 32 s for 142,112,452 flows, 0 rows rejected |
-| Stored | 60,188 product-years, 5,084 products, 200 supplier countries |
-| 2024, products over $1M | 1,823, of which 1,090 with HHI at or above 0.25 |
-| Concentrated by choice, 2024 | 877 products, $12.42B of $25.03B |
-| Wheat 1001, 2024 | $653.7M, 17 suppliers, Russia 45.4%, top 3 79.0%, HHI 0.283 |
-| API, median of 5 | overview 801 ms, product history 60 ms, movers 425 ms, country profile 278 ms |
+| Tests | 69 passed locally against MongoDB 9.0 |
+| Tunisia, 2024, products over $1M | 1,823, of which 1,090 with HHI at or above 0.25 |
+| Tunisia, concentrated by choice, 2024 | 877 products, $12.42B of $25.03B |
+| Tunisia, wheat 1001, 2024 | $653.7M, 17 suppliers, Russia 45.4%, top 3 79.0%, HHI 0.283 |
+
+The Tunisia figures come from the earlier Tunisia-only import, measured on the same release with the same `metrics.py`. Storage and build-time estimates for every country are in [architecture-research.md](docs/architecture-research.md).
 
 ## Repository
 
 | Path | Contents |
 | --- | --- |
-| [`atlas/`](atlas/) | import, metrics, API and the web app, with what each test guarantees |
-| [`tests/`](tests/) | unit, import and API tests against a real MongoDB |
-| [`docs/`](docs/) | conception diagrams, data dictionary and three case studies |
+| [`atlas/`](atlas/) | preparation, country views, metrics, API and the web app, with what each test guarantees |
+| [`tests/`](tests/) | unit, preparation and API tests against a real MongoDB |
+| [`docs/`](docs/) | conception diagrams, data dictionary, storage research and three case studies |
 | [`docker-compose.yml`](docker-compose.yml) | MongoDB 9.0 and the app, both pinned |
 
 ## Built with
 
-Python 3.12, FastAPI 0.143.3, PyMongo 4.19.0, MongoDB 9.0, ECharts 5.6.0, Tabulator 6.3.1, topojson-client 3.1.0 and world-atlas 2.0.2.
+Python 3.12, FastAPI 0.143.3, PyMongo 4.19.0, DuckDB 1.5.6, MongoDB 9.0, ECharts 5.6.0, Tabulator 6.3.1, topojson-client 3.1.0 and world-atlas 2.0.2.
 
 ## Data
 
-[CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), HS 2012 nomenclature, release V202601, under the Etalab Open License 2.0. Only flows into Tunisia are stored, plus the concentration and top exporters of each product's world market. The archive stays out of git and out of the image.
+[CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), HS 2012 nomenclature, release V202601, under the Etalab Open License 2.0. GDP per capita, PPP, constant 2021 dollars, from the [World Bank WDI](https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD) under CC BY 4.0. The archive and the prepared files stay out of git and out of the image.
 
 ## License
 

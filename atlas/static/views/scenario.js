@@ -1,5 +1,5 @@
 import { lang, t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, index, indexColumn, kpi, pct, pctColumn, query, snapshotDetail, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, index, indexColumn, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
 
 const LABEL = t("Historical import value exposed under this scenario");
 const BARS = 15;
@@ -15,7 +15,7 @@ export default async function scenario(root, _, params) {
   root.append(html(`
     <div class="head">
       <h1>${t("Disruption scenario")}</h1>
-      <p class="lede">${t("Cut the imports from chosen suppliers by a percentage and see how much of Tunisia's historical import value sits behind them. Other suppliers are left as they were, with no replacement and no price response.")}</p>
+      <p class="lede">${t("Cut the imports from chosen suppliers by a percentage and see how much of the historical import value of {reporter} sits behind them. Other suppliers are left as they were, with no replacement and no price response.", { reporter: esc(state.reporter.countryName) })}</p>
       <div class="controls">
         <span class="segmented">
           <a href="#/scenario?mode=product" class="${mode === "product" ? "active" : ""}">${t("One product")}</a>
@@ -44,6 +44,7 @@ export default async function scenario(root, _, params) {
 
   const spec = () => ({
     snapshot: state.snapshot._id,
+    reporter: state.reporter.countryCode,
     year: Number(form.year.value),
     mode,
     productCode: mode === "product" ? form.code.value.trim() : null,
@@ -58,9 +59,8 @@ export default async function scenario(root, _, params) {
 
   async function listChoices() {
     if (mode === "country") {
-      const detail = await snapshotDetail();
-      const countries = detail.countries
-        .filter((c) => c.countryCode !== detail.reporter.countryCode)
+      const countries = state.detail.countries
+        .filter((c) => c.countryCode !== state.reporter.countryCode)
         .sort((a, b) => a.countryName.localeCompare(b.countryName, lang));
       choices.innerHTML = countries.map((c) => `<label data-name="${esc(c.countryName.toLowerCase())}">
         <input type="checkbox" value="${c.countryCode}" ${chosen.has(c.countryCode) ? "checked" : ""}> ${esc(c.countryName)}</label>`).join("");
@@ -68,12 +68,12 @@ export default async function scenario(root, _, params) {
     }
     const value = form.code.value.trim();
     if (!/^(\d{2}){1,3}$/.test(value)) return;
-    const history = await api(`/products/${value}/history?${query({ snapshot: state.snapshot._id })}`);
+    const history = await api(`/products/${value}/history?${scoped()}`);
     const suppliers = history.years.find((y) => y.year === Number(form.year.value))?.suppliers ?? [];
     choices.innerHTML = suppliers.length
       ? suppliers.map((s) => `<label><input type="checkbox" value="${s.countryCode}" ${chosen.has(s.countryCode) ? "checked" : ""}>
           ${esc(s.countryName)}<span class="value">${usd(s.valueUsd)} · ${pct(s.share)}</span></label>`).join("")
-      : `<p class="notice">${esc(t("No recorded imports of {code} into Tunisia in {year}.", { code: value, year: form.year.value }))}</p>`;
+      : `<p class="notice">${esc(t("No recorded imports of {code} into {reporter} in {year}.", { reporter: state.reporter.countryName, code: value, year: form.year.value }))}</p>`;
   }
 
   let timer;
@@ -184,7 +184,7 @@ function showCountry(root, s, r) {
   root.querySelector("#result").innerHTML = `
     <div class="kpis">
       ${kpi(LABEL, usd(r.affectedUsd), String(s.year))}
-      ${kpi(t("Share of all Tunisian imports"), pct(r.exposureShare, 2), t("of {value}", { value: usd(r.totalImportsUsd) }))}
+      ${kpi(t("Share of all imports"), pct(r.exposureShare, 2), t("of {value}", { value: usd(r.totalImportsUsd) }))}
       ${kpi(t("Products touched"), count(r.products.length))}
     </div>
     <p class="note">${r.suppliers.map((x) => esc(t("{name} supplied {value}", { name: x.countryName, value: usd(x.valueUsd) }))).join(", ")}.</p>`;

@@ -1,9 +1,11 @@
-"""HTTP API over one or more imported snapshots.
+"""HTTP API over one or more prepared snapshots, for any reporting country.
 
     uvicorn atlas.api:app
 
-Every request names its snapshot, and every figure in a response is computed
-here from stored supplier values. Numbers sent by the browser are never used.
+Every request names its snapshot and its reporter, the country whose imports
+and exports are shown. The reporter's view is built on its first visit, and
+every figure in a response is computed here from stored values. Numbers sent
+by the browser are never used.
 """
 
 import csv
@@ -22,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pymongo.database import Database
 
-from atlas import metrics, routes
+from atlas import materialize, metrics, routes
 from atlas.db import connect
 
 CODE_PATTERN = r"^\d{2}(\d{2}){0,2}$"
@@ -36,7 +38,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="AtlasOfDoubt", lifespan=lifespan)
-# The overview sends every imported product at once, about 2 MB of JSON for a real year.
+# The imports page sends every imported product at once, about 2 MB of JSON for a real year.
 app.add_middleware(GZipMiddleware)
 
 
@@ -46,7 +48,9 @@ def database(request: Request):
 
 Db = Annotated[Database, Depends(database)]
 SnapshotId = Annotated[str, Query(alias="snapshot")]
+Reporter = Annotated[int, Query()]
 Code = Annotated[str, Path(pattern=CODE_PATTERN)]
+MinValue = Annotated[int, Query(alias="minValue", ge=0)]
 
 
 def ready_snapshot(db, snapshot_id):
@@ -54,6 +58,20 @@ def ready_snapshot(db, snapshot_id):
     if not snapshot:
         raise HTTPException(404, f"no ready snapshot {snapshot_id}")
     return snapshot
+
+
+def find_country(snapshot, code, status=404):
+    country = next((c for c in snapshot["countries"] if c["countryCode"] == code), None)
+    if not country:
+        raise HTTPException(status, f"no country {code} in {snapshot['_id']}")
+    return country
+
+
+def scope(db, snapshot_id, reporter):
+    """The snapshot, the reporter and the generation of the reporter's cached view."""
+    snapshot = ready_snapshot(db, snapshot_id)
+    country = find_country(snapshot, reporter, status=422)
+    return snapshot, country, materialize.ensure(db, snapshot, reporter)
 
 
 def checked_year(snapshot, year):
@@ -75,23 +93,27 @@ def group_products(db, snapshot_id, code):
     return found
 
 
-def product_years(db, snapshot_id, code, year=None):
-    query = {"snapshotId": snapshot_id, "productCode": {"$regex": f"^{code}"}}
-    if year is not None:
-        query["year"] = year
-    return list(db.product_years.find(query, {"_id": 0}))
+def cached(db, generation, code=None, **query):
+    if code:
+        query["productCode"] = {"$regex": f"^{code}"}
+    return list(db.country_product_years.find({"generationId": generation, **query}, {"_id": 0}))
 
 
 def combined_suppliers(code, docs):
     """Stored suppliers of one product, or a group's suppliers summed across products."""
+    lists = [d["imports"]["suppliers"] for d in docs if "imports" in d]
     if len(code) == 6:
-        return docs[0]["suppliers"] if docs else []
-    return metrics.merge(d["suppliers"] for d in docs)
+        return lists[0] if lists else []
+    return metrics.merge(lists)
+
+
+def names_of(snapshot):
+    return {c["countryCode"]: c for c in snapshot["countries"]}
 
 
 @app.get("/api/snapshots")
 def list_snapshots(db: Db):
-    return list(db.snapshots.find({"status": "ready"}, {"countries": 0, "errors.samples": 0}).sort("_id", -1))
+    return list(db.snapshots.find({"status": "ready"}, {"countries": 0, "files": 0, "errors.samples": 0}).sort("_id", -1))
 
 
 @app.get("/api/snapshots/{snapshot_id}")
@@ -112,22 +134,30 @@ def search_products(db: Db, snapshot_id: SnapshotId, q: str = ""):
 
 
 @app.get("/api/overview")
-def overview(db: Db, snapshot_id: SnapshotId, year: int | None = None, min_value: Annotated[int, Query(alias="minValue", ge=0)] = 0):
-    year = checked_year(ready_snapshot(db, snapshot_id), year)
-    rows = db.product_years.find(
-        {"snapshotId": snapshot_id, "year": year, "metrics.totalUsd": {"$gte": min_value}},
-        {"_id": 0, "productCode": 1, "description": 1, "metrics": 1, "world.hhi": 1, "world.totalUsd": 1, "world.topSupplier": 1},
-    ).sort("metrics.totalUsd", -1)
-    return {"snapshot": snapshot_id, "year": year, "rows": list(rows)}
+def overview(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None, min_value: MinValue = 0):
+    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    year = checked_year(snapshot, year)
+    found = db.country_product_years.find(
+        {"generationId": generation, "year": year, "imports.metrics.totalUsd": {"$gte": min_value}},
+        {"_id": 0, "productCode": 1, "description": 1, "imports.metrics": 1, "imports.world.hhi": 1, "imports.world.totalUsd": 1,
+         "imports.world.topSupplier": 1},
+    ).sort("imports.metrics.totalUsd", -1)
+    rows = [
+        {"productCode": r["productCode"], "description": r["description"], "metrics": r["imports"]["metrics"],
+         "world": r["imports"].get("world")}
+        for r in found
+    ]
+    return {"snapshot": snapshot_id, "reporter": reporter, "year": year, "rows": rows}
 
 
 @app.get("/api/movers")
 def movers(
     db: Db,
     snapshot_id: SnapshotId,
+    reporter: Reporter,
     start: Annotated[int | None, Query(alias="from")] = None,
     end: Annotated[int | None, Query(alias="to")] = None,
-    min_value: Annotated[int, Query(alias="minValue", ge=0)] = 0,
+    min_value: MinValue = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
 ):
     """Products whose supplier HHI rose or fell the most between two years.
@@ -135,14 +165,16 @@ def movers(
     A product counts only if it reached minValue in both years, so a trickle of imports
     that swings from one supplier to another does not crowd out the products that matter.
     """
-    snapshot = ready_snapshot(db, snapshot_id)
+    snapshot, _, generation = scope(db, snapshot_id, reporter)
     start = checked_year(snapshot, start if start is not None else min(snapshot["years"]))
     end = checked_year(snapshot, end)
-    fields = {"_id": 0, "productCode": 1, "description": 1, "metrics.hhi": 1, "metrics.totalUsd": 1, "metrics.topSupplier": 1}
 
     def year_rows(year):
-        query = {"snapshotId": snapshot_id, "year": year, "metrics.totalUsd": {"$gte": min_value}, "metrics.hhi": {"$ne": None}}
-        found = db.product_years.find(query, fields)
+        found = db.country_product_years.find(
+            {"generationId": generation, "year": year, "imports.metrics.totalUsd": {"$gte": min_value},
+             "imports.metrics.hhi": {"$ne": None}},
+            {"_id": 0, "productCode": 1, "description": 1, "imports.metrics": 1},
+        )
         return {r["productCode"]: r for r in found}
 
     before = year_rows(start)
@@ -150,80 +182,106 @@ def movers(
     for code, after in year_rows(end).items():
         if code not in before:
             continue
-        old, new = before[code]["metrics"], after["metrics"]
+        old, new = before[code]["imports"]["metrics"], after["imports"]["metrics"]
         changes.append({
             "productCode": code, "description": after["description"],
             "from": old, "to": new, "change": new["hhi"] - old["hhi"],
         })
     changes.sort(key=lambda r: r["change"])
     return {
-        "snapshot": snapshot_id, "from": start, "to": end, "compared": len(changes),
+        "snapshot": snapshot_id, "reporter": reporter, "from": start, "to": end, "compared": len(changes),
         "rising": [r for r in reversed(changes[-limit:]) if r["change"] > 0],
         "falling": [r for r in changes[:limit] if r["change"] < 0],
     }
 
 
 @app.get("/api/products/{code}/history")
-def history(db: Db, code: Code, snapshot_id: SnapshotId):
-    snapshot = ready_snapshot(db, snapshot_id)
+def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
+    """The reporter's imports and exports of one product or group, year by year.
+
+    A group's RCA compares the reporter's summed exports of the group with the
+    world's summed exports of it, as for one product.
+    """
+    snapshot, _, generation = scope(db, snapshot_id, reporter)
     products = group_products(db, snapshot_id, code)
     by_year = {}
-    for doc in product_years(db, snapshot_id, code):
+    for doc in cached(db, generation, code):
         by_year.setdefault(doc["year"], []).append(doc)
+    world_totals, baskets = {}, {}
+    if len(code) < 6:
+        world = db.world_product_years.aggregate([
+            {"$match": {"snapshotId": snapshot_id, "productCode": {"$regex": f"^{code}"}}},
+            {"$group": {"_id": "$year", "totalUsd": {"$sum": "$totalUsd"}}},
+        ])
+        world_totals = {r["_id"]: r["totalUsd"] for r in world}
+        baskets = {
+            y["year"]: y["exportsUsd"]
+            for y in db.country_years.find({"snapshotId": snapshot_id, "countryCode": reporter}, {"year": 1, "exportsUsd": 1})
+        }
+
     years = []
     for year in snapshot["years"]:
-        docs = by_year.get(year)
-        if not docs:
-            years.append({"year": year, "metrics": None, "suppliers": [], "world": None})
-            continue
+        docs = by_year.get(year, [])
         suppliers = combined_suppliers(code, docs)
+        sold = [d["exports"] for d in docs if "exports" in d]
+        if len(code) == 6:
+            imported = docs[0].get("imports") if docs else None
+            world, exports = imported and imported["world"], sold[0] if sold else None
+        else:
+            value = sum((e["totalUsd"] for e in sold), metrics.ZERO)
+            world = None
+            exports = {
+                "totalUsd": value,
+                "rca": metrics.rca(value, baskets.get(year), world_totals.get(year), snapshot["worldTotals"][str(year)]),
+                "worldShare": value / world_totals[year],
+            } if sold else None
         years.append({
             "year": year,
-            "metrics": metrics.summarize(suppliers),
+            "metrics": metrics.summarize(suppliers) if suppliers else None,
             "suppliers": metrics.with_shares(suppliers),
-            "world": docs[0]["world"] if len(code) == 6 else None,
+            "world": world,
+            "exports": exports,
         })
-    return {"snapshot": snapshot_id, "code": code, "products": products, "years": years}
+    return {"snapshot": snapshot_id, "reporter": reporter, "code": code, "products": products, "years": years}
 
 
 @app.get("/api/countries/{country_code}")
-def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, year: int | None = None):
-    """What one supplier country sends Tunisia: a yearly trend and the products of one year.
+def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None):
+    """What one partner sends the reporter, and what the reporter sends it back.
 
     Rank is one plus the number of suppliers that sent more, so equal values share a rank.
     """
-    snapshot = ready_snapshot(db, snapshot_id)
+    snapshot, home, generation = scope(db, snapshot_id, reporter)
     year = checked_year(snapshot, year)
-    country = next((c for c in snapshot["countries"] if c["countryCode"] == country_code), None)
-    if not country:
-        raise HTTPException(404, f"no country {country_code} in {snapshot_id}")
+    country = find_country(snapshot, country_code)
 
-    own = {"$first": {"$filter": {"input": "$suppliers", "cond": {"$eq": ["$$this.countryCode", country_code]}}}}
-    imports = db.product_years.aggregate([
-        {"$match": {"snapshotId": snapshot_id}},
-        {"$group": {"_id": "$year", "totalUsd": {"$sum": "$metrics.totalUsd"}}},
-    ])
-    totals = {r["_id"]: r["totalUsd"] for r in imports}
-    supplied = db.product_years.aggregate([
-        {"$match": {"snapshotId": snapshot_id, "suppliers.countryCode": country_code}},
+    totals = {
+        y["year"]: y for y in db.country_years.find({"snapshotId": snapshot_id, "countryCode": reporter})
+    }
+    own = {"$first": {"$filter": {"input": "$imports.suppliers", "cond": {"$eq": ["$$this.countryCode", country_code]}}}}
+    supplied = db.country_product_years.aggregate([
+        {"$match": {"generationId": generation, "imports.suppliers.countryCode": country_code}},
         {"$project": {"year": 1, "own": own}},
         {"$group": {"_id": "$year", "valueUsd": {"$sum": "$own.valueUsd"}, "productCount": {"$sum": 1}}},
     ])
     by_year = {r["_id"]: r for r in supplied}
     years = []
     for y in snapshot["years"]:
-        row = by_year.get(y)
+        row, total = by_year.get(y), totals.get(y)
+        sold = next((d["valueUsd"] for d in total["destinations"] if d["countryCode"] == country_code), None) if total else None
         years.append({
             "year": y,
             "valueUsd": row["valueUsd"] if row else None,
-            "shareOfImports": row["valueUsd"] / totals[y] if row else None,
+            "shareOfImports": row["valueUsd"] / total["importsUsd"] if row else None,
             "productCount": row["productCount"] if row else 0,
+            "exportsUsd": sold,
+            "shareOfExports": sold / total["exportsUsd"] if sold else None,
         })
 
     # Ranking inside the database sends one small row per product instead of every supplier list.
-    rows = db.product_years.aggregate([
-        {"$match": {"snapshotId": snapshot_id, "year": year, "suppliers.countryCode": country_code}},
-        {"$project": {"productCode": 1, "description": 1, "metrics": 1, "values": "$suppliers.valueUsd", "own": own}},
+    rows = db.country_product_years.aggregate([
+        {"$match": {"generationId": generation, "year": year, "imports.suppliers.countryCode": country_code}},
+        {"$project": {"productCode": 1, "description": 1, "metrics": "$imports.metrics", "values": "$imports.suppliers.valueUsd", "own": own}},
         {"$project": {
             "_id": 0,
             "productCode": 1,
@@ -237,10 +295,11 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, year: in
         {"$sort": {"valueUsd": -1}},
     ])
     products = [{**r, "share": r["valueUsd"] / r["totalUsd"]} for r in rows]
-    route = next((r for r in routes.ROUTES if r["id"] == routes.ROUTE_OF.get(country["isoCode"])), None)
+    route = routes.route(home["isoCode"], country["isoCode"])
     return {
-        "snapshot": snapshot_id, "year": year, "country": country, "years": years, "products": products,
-        "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]} if route else None,
+        "snapshot": snapshot_id, "reporter": home, "year": year, "country": country, "years": years, "products": products,
+        "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]}
+        if route else None,
     }
 
 
@@ -248,35 +307,40 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, year: in
 def sea_routes(
     db: Db,
     snapshot_id: SnapshotId,
+    reporter: Reporter,
     year: int | None = None,
     code: Annotated[str | None, Query(pattern=CODE_PATTERN)] = None,
 ):
-    """Imports grouped by modelled sea route and chokepoint, for one year and as a yearly trend.
+    """The reporter's imports grouped by modelled sea route and chokepoint, for one year and as a yearly trend.
 
     A chokepoint carries the sum of the routes through it, so a country counts once
     per strait it passes and never twice on one strait.
     """
-    snapshot = ready_snapshot(db, snapshot_id)
+    snapshot, home, generation = scope(db, snapshot_id, reporter)
     year = checked_year(snapshot, year)
-    match = {"snapshotId": snapshot_id}
+    match = {"generationId": generation, "imports": {"$exists": True}}
     if code:
         group_products(db, snapshot_id, code)
         match["productCode"] = {"$regex": f"^{code}"}
-    names = {c["countryCode"]: c for c in snapshot["countries"]}
-    supplied = db.product_years.aggregate([
+    names = names_of(snapshot)
+    supplied = db.country_product_years.aggregate([
         {"$match": match},
-        {"$unwind": "$suppliers"},
-        {"$group": {"_id": {"year": "$year", "country": "$suppliers.countryCode"}, "valueUsd": {"$sum": "$suppliers.valueUsd"}}},
+        {"$unwind": "$imports.suppliers"},
+        {"$group": {"_id": {"year": "$year", "country": "$imports.suppliers.countryCode"},
+                    "valueUsd": {"$sum": "$imports.suppliers.valueUsd"}}},
     ])
     by_year = {y: [] for y in snapshot["years"]}
     for r in supplied:
-        country = names.get(r["_id"]["country"], {"countryCode": r["_id"]["country"], "countryName": str(r["_id"]["country"])})
+        country = names[r["_id"]["country"]]
         by_year[r["_id"]["year"]].append({
             "countryCode": country["countryCode"], "countryName": country["countryName"],
-            "isoCode": country.get("isoCode"), "valueUsd": r["valueUsd"],
+            "isoCode": country["isoCode"], "valueUsd": r["valueUsd"],
         })
     grouped = {y: routes.by_route(s) for y, s in by_year.items()}
     totals = {y: metrics.total(s) for y, s in by_year.items()}
+    plan = routes.plan(home["isoCode"])
+    # A reporter outside every region has no modelled routes, so all its suppliers are unrouted.
+    unrouted = [None] if plan else [None, *(r["id"] for r in routes.REGIONS)]
 
     def measure(route_ids, y):
         value = metrics.total(s for r in route_ids for s in grouped[y].get(r, []))
@@ -291,16 +355,43 @@ def sea_routes(
         }
 
     return {
-        "snapshot": snapshot_id, "year": year, "code": code, "totalUsd": totals[year],
+        "snapshot": snapshot_id, "reporter": home, "year": year, "code": code, "totalUsd": totals[year],
+        "home": next((r["hub"] for r in routes.REGIONS if r["id"] == routes.REGION_OF.get(home["isoCode"])), None),
         "chokepoints": [
-            {"id": c, "name": p["name"], "at": p["at"], "routes": routes.through(c), **entry(routes.through(c))}
+            {"id": c, "name": p["name"], "at": p["at"], "routes": routes.through(plan, c), **entry(routes.through(plan, c))}
             for c, p in routes.CHOKEPOINTS.items()
         ],
-        "routes": [
-            {"id": r["id"], "name": r["name"], "via": r["via"], "path": r["path"], **entry([r["id"]])}
-            for r in routes.ROUTES
-        ],
-        "unrouted": entry([None]),
+        "routes": [{**r, **entry([r["id"]])} for r in plan],
+        "unrouted": entry(unrouted),
+    }
+
+
+@app.get("/api/exports")
+def exports(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None, min_value: MinValue = 0):
+    """The reporter's export structure: a yearly trend, its destinations and its products of one year."""
+    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    year = checked_year(snapshot, year)
+    names = names_of(snapshot)
+    by_year = {y["year"]: y for y in db.country_years.find({"snapshotId": snapshot_id, "countryCode": reporter}, {"_id": 0})}
+    trend = [
+        {k: by_year[y][k] for k in ("year", "exportsUsd", "importsUsd", "productHhi", "geoHhi", "expy", "expyFixed2012")}
+        if y in by_year else {"year": y, "exportsUsd": None}
+        for y in snapshot["years"]
+    ]
+    chosen = by_year.get(year)
+    destinations = [
+        {**{k: names[d["countryCode"]][k] for k in ("countryCode", "countryName", "isoCode")}, "valueUsd": d["valueUsd"],
+         "share": d["valueUsd"] / chosen["exportsUsd"]}
+        for d in chosen["destinations"]
+    ] if chosen else []
+    found = db.country_product_years.find(
+        {"generationId": generation, "year": year, "exports.totalUsd": {"$gte": min_value}},
+        {"_id": 0, "productCode": 1, "description": 1, "exports": 1},
+    ).sort("exports.totalUsd", -1)
+    products = [{"productCode": r["productCode"], "description": r["description"], **r["exports"]} for r in found]
+    return {
+        "snapshot": snapshot_id, "reporter": reporter, "year": year, "gdp": snapshot.get("gdp"),
+        "years": trend, "destinations": destinations, "products": products,
     }
 
 
@@ -315,6 +406,7 @@ LIMITATIONS = [
 
 class ScenarioSpec(BaseModel):
     snapshot: str
+    reporter: int
     year: int
     mode: Literal["product", "country"]
     productCode: str | None = Field(None, pattern=CODE_PATTERN)
@@ -326,7 +418,7 @@ class ReportRequest(ScenarioSpec):
     title: str = Field(min_length=1, max_length=200)
 
 
-def run_scenario(db, snapshot, spec):
+def run_scenario(db, snapshot, generation, spec):
     checked_year(snapshot, spec.year)
     names = {c["countryCode"]: c["countryName"] for c in snapshot["countries"]}
     unknown = set(spec.suppliers) - names.keys()
@@ -336,7 +428,7 @@ def run_scenario(db, snapshot, spec):
         if spec.productCode is None:
             raise HTTPException(422, "product mode needs a productCode")
         products = group_products(db, spec.snapshot, spec.productCode)
-        suppliers = combined_suppliers(spec.productCode, product_years(db, spec.snapshot, spec.productCode, spec.year))
+        suppliers = combined_suppliers(spec.productCode, cached(db, generation, spec.productCode, year=spec.year))
         return {
             "description": products[0]["description"] if len(spec.productCode) == 6 else f"{len(products)} products",
             **metrics.scenario(suppliers, spec.suppliers, spec.reduction),
@@ -344,17 +436,15 @@ def run_scenario(db, snapshot, spec):
 
     selected = set(spec.suppliers)
     rows, total_imports, supplier_totals = [], metrics.ZERO, dict.fromkeys(selected, metrics.ZERO)
-    docs = db.product_years.find(
-        {"snapshotId": spec.snapshot, "year": spec.year}, {"_id": 0, "productCode": 1, "description": 1, "suppliers": 1}
-    )
-    for doc in docs:
-        total_imports += metrics.total(doc["suppliers"])
-        hit = [s for s in doc["suppliers"] if s["countryCode"] in selected]
+    for doc in cached(db, generation, year=spec.year, imports={"$exists": True}):
+        suppliers = doc["imports"]["suppliers"]
+        total_imports += metrics.total(suppliers)
+        hit = [s for s in suppliers if s["countryCode"] in selected]
         if not hit:
             continue
         for s in hit:
             supplier_totals[s["countryCode"]] += s["valueUsd"]
-        result = metrics.scenario(doc["suppliers"], selected, spec.reduction)
+        result = metrics.scenario(suppliers, selected, spec.reduction)
         rows.append({
             "productCode": doc["productCode"],
             "description": doc["description"],
@@ -379,19 +469,21 @@ def run_scenario(db, snapshot, spec):
 
 @app.post("/api/scenarios/preview")
 def preview(db: Db, spec: ScenarioSpec):
-    result = run_scenario(db, ready_snapshot(db, spec.snapshot), spec)
+    snapshot, _, generation = scope(db, spec.snapshot, spec.reporter)
+    result = run_scenario(db, snapshot, generation, spec)
     return {"spec": spec.model_dump(), "calculationVersion": metrics.CALCULATION_VERSION, "result": result}
 
 
 @app.post("/api/reports", status_code=201)
 def create_report(db: Db, request: ReportRequest):
-    snapshot = ready_snapshot(db, request.snapshot)
-    result = run_scenario(db, snapshot, request)
+    snapshot, reporter, generation = scope(db, request.snapshot, request.reporter)
+    result = run_scenario(db, snapshot, generation, request)
     report = {
         "title": request.title,
         "createdAt": datetime.now(timezone.utc),
+        "reporter": {k: reporter[k] for k in ("countryCode", "countryName", "isoCode")},
         "spec": request.model_dump(exclude={"title"}),
-        "snapshot": {"id": snapshot["_id"], "source": snapshot["source"], "archive": snapshot["archive"]},
+        "snapshot": {k: snapshot[k] for k in ("source", "archive", "manifest")} | {"id": snapshot["_id"]},
         "calculationVersion": metrics.CALCULATION_VERSION,
         "limitations": LIMITATIONS,
         "result": result,
@@ -407,8 +499,8 @@ def find_report(db, report_id):
 
 
 @app.get("/api/reports")
-def list_reports(db: Db):
-    reports = db.reports.find({}, {"title": 1, "createdAt": 1, "spec": 1}).sort("createdAt", -1)
+def list_reports(db: Db, reporter: Reporter):
+    reports = db.reports.find({"reporter.countryCode": reporter}, {"title": 1, "createdAt": 1, "spec": 1}).sort("createdAt", -1)
     return [{**r, "_id": str(r["_id"])} for r in reports]
 
 

@@ -1,5 +1,5 @@
 import { lang, t } from "../i18n.js";
-import { api, esc, html, pct, table } from "../lib.js";
+import { api, esc, html, pct, query, state, table } from "../lib.js";
 import { showResult } from "./scenario.js";
 
 const stamp = new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeStyle: "short" });
@@ -9,10 +9,10 @@ export default async function reports(root, [id]) {
 }
 
 async function list(root) {
-  const rows = await api("/reports");
+  const rows = await api(`/reports?${query({ reporter: state.reporter.countryCode })}`);
   root.append(html(`
     <div class="head">
-      <h1>${t("Evidence reports")}</h1>
+      <h1>${t("Evidence reports, {reporter}", { reporter: esc(state.reporter.countryName) })}</h1>
       <p class="lede">${t("Each report freezes a scenario, its result and the exact BACI archive it came from. Reports are never recalculated, so a newer release leaves them as they were saved.")}</p>
     </div>
     <div class="panel"><div id="reports"></div></div>`));
@@ -52,6 +52,7 @@ async function report(root, id) {
       <div class="panel"><h2>${t("Result")}</h2><div id="result"></div></div>
       <div class="panel"><h2>${t("Provenance")}</h2>
         <dl class="facts">
+          <dt>${t("Country")}</dt><dd>${esc(r.reporter.countryName)} <code>${esc(r.reporter.isoCode)}</code></dd>
           <dt>${t("Source")}</dt><dd>${esc(snapshot.source.name)} ${esc(snapshot.source.classification)}, ${esc(t("release {release}", { release: snapshot.source.release }))}</dd>
           <dt>${t("Snapshot")}</dt><dd><code>${esc(snapshot.id)}</code></dd>
           <dt>${t("Archive")}</dt><dd><code>${esc(snapshot.archive.filename)}</code></dd>

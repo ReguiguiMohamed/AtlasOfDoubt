@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { TUNISIA, api, axis, chart, count, css, esc, html, index, kpi, loadWorld, pct, pctColumn, query, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, index, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
 
 const CASE_STUDIES = [
   ["10", "Cereals (chapter 10)"],
@@ -12,7 +12,8 @@ const TRACKED = 5;
 
 export default async function product(root, [code], params) {
   if (!code) return search(root, params.get("q") ?? "");
-  const data = await api(`/products/${code}/history?${query({ snapshot: state.snapshot._id })}`);
+  const data = await api(`/products/${code}/history?${scoped()}`);
+  const reporter = esc(state.reporter.countryName);
   const single = code.length === 6;
   const members = data.products.length;
   const title = single
@@ -21,7 +22,7 @@ export default async function product(root, [code], params) {
   const recorded = data.years.filter((y) => y.metrics);
   if (!recorded.length) {
     root.append(html(`<div class="head"><h1><span class="code">${esc(code)}</span> ${esc(title)}</h1>
-      <p class="notice">${t("BACI records no imports of this code into Tunisia between {from} and {to}.", { from: state.snapshot.years[0], to: state.snapshot.years.at(-1) })}</p></div>`));
+      <p class="notice">${t("BACI records no imports of this code into {reporter} between {from} and {to}.", { reporter, from: state.snapshot.years[0], to: state.snapshot.years.at(-1) })}</p></div>`));
     return;
   }
   const wanted = Number(params.get("year"));
@@ -31,8 +32,8 @@ export default async function product(root, [code], params) {
   root.append(html(`
     <div class="head">
       <h1><span class="code">${esc(code)}</span> ${esc(title)}</h1>
-      <p class="lede">${single ? "" : t("Supplier values are summed across the group before shares and the HHI are computed.")}
-        ${t("Gaps in the trend are years with no recorded flow into Tunisia.")}</p>
+      <p class="lede">${t(single ? "HS6 product {code}, in heading {heading} of chapter {chapter}." : "Every HS6 product whose code starts with {code}. Supplier values are summed across the group before shares and the HHI are computed.", { code, heading: code.slice(0, 4), chapter: code.slice(0, 2) })}
+        ${t("Gaps in the trend are years with no recorded flow into {reporter}.", { reporter })}</p>
       <form class="controls">
         <label>${t("Year")} <select name="year">${recorded
           .map((y) => `<option ${y.year === current.year ? "selected" : ""}>${y.year}</option>`).reverse().join("")}</select></label>
@@ -49,7 +50,7 @@ export default async function product(root, [code], params) {
       ${current.world ? kpi(t("World exporter HHI"), index(current.world.hhi), t("{name} leads world exports", { name: current.world.topSupplier?.countryName })) : ""}
     </div>
     <div class="panel" id="where"><h2>${t("Where the supply comes from, {year}", { year: current.year })}</h2>
-      <p>${t("Shaded by share of Tunisia's imports, with Tunisia in red. Very small countries do not show at this scale and are listed in the table.")}</p>
+      <p>${t("Shaded by share of the imports of {reporter}, with {reporter} in red. Very small countries do not show at this scale and are listed in the table.", { reporter })}</p>
       <div class="chart map" id="map"></div></div>
     <div class="grid">
       <div class="panel"><h2>${t("Suppliers in {year}", { year: current.year })}</h2><div class="chart tall" id="bars"></div></div>
@@ -58,8 +59,11 @@ export default async function product(root, [code], params) {
     <div class="panel" style="margin-top:1.25rem"><h2>${t("Imports and concentration, {from} to {to}", { from: data.years[0].year, to: data.years.at(-1).year })}</h2>
       <div class="chart" id="trend"></div></div>
     <div class="panel"><h2>${t("Shares of the five largest suppliers over time")}</h2><div class="chart" id="shares"></div></div>
+    <div class="panel"><h2>${t("Exports of {reporter}, {from} to {to}", { reporter, from: data.years[0].year, to: data.years.at(-1).year })}</h2>
+      <p>${t("Revealed comparative advantage compares the share of this code in the exports of {reporter} with its share in world exports. Above 1, {reporter} exports relatively more of it than the world does.", { reporter })}</p>
+      <div class="chart" id="exports"></div></div>
     ${current.world ? `<div class="panel"><h2>${t("Who else sells it, {year}", { year: current.year })}</h2>
-      <p>${t("The largest exporters of this product worldwide, against what each sent Tunisia. A large exporter that sends little is a supplier Tunisia could turn to.")}</p>
+      <p>${t("The largest exporters of this product worldwide, against what each sent {reporter}. A large exporter that sends little is a supplier {reporter} could turn to.", { reporter })}</p>
       <div id="exporters"></div></div>` : ""}
     ${single ? "" : `<div class="panel"><h2>${t("Products in this group")}</h2><div id="members"></div></div>`}
   `));
@@ -131,7 +135,7 @@ export default async function product(root, [code], params) {
         emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent") } },
         data: [
           ...ranked.map((s) => ({ name: shapeId(s.countryCode), value: s.share, supplier: s })),
-          { name: TUNISIA, itemStyle: { areaColor: css("--warn") }, emphasis: { disabled: true } },
+          { name: shapeId(state.reporter.countryCode), itemStyle: { areaColor: css("--warn") }, emphasis: { disabled: true } },
         ],
       }],
     }), "series").on("click", (p) => profile(p.data?.supplier?.countryCode)))
@@ -149,10 +153,25 @@ export default async function product(root, [code], params) {
     ],
     series: [
       { name: t("Imports"), type: "bar", data: data.years.map((y) => y.metrics?.totalUsd ?? null), itemStyle: { color: css("--accent-2") } },
-      { name: t("Tunisia HHI"), type: "line", yAxisIndex: 1, data: data.years.map((y) => y.metrics?.hhi ?? null), itemStyle: { color: css("--warn") } },
+      { name: t("Supplier HHI"), type: "line", yAxisIndex: 1, data: data.years.map((y) => y.metrics?.hhi ?? null), itemStyle: { color: css("--warn") } },
       ...(single
         ? [{ name: t("World exporter HHI"), type: "line", yAxisIndex: 1, lineStyle: { type: "dashed" }, data: data.years.map((y) => y.world?.hhi ?? null), itemStyle: { color: css("--accent") } }]
         : []),
+    ],
+  });
+
+  chart(root.querySelector("#exports"), {
+    grid: { left: 70, right: 60, top: 40, bottom: 30 },
+    legend: { textStyle: { color: css("--muted") } },
+    tooltip: { trigger: "axis" },
+    xAxis: { ...axis(), type: "category", data: years },
+    yAxis: [
+      { ...axis(), type: "value", axisLabel: { color: css("--muted"), formatter: usd } },
+      { ...axis(), type: "value", min: 0, splitLine: { show: false } },
+    ],
+    series: [
+      { name: t("Exports"), type: "bar", data: data.years.map((y) => y.exports?.totalUsd ?? null), itemStyle: { color: css("--accent") }, tooltip: { valueFormatter: usd } },
+      { name: t("RCA"), type: "line", yAxisIndex: 1, data: data.years.map((y) => y.exports?.rca ?? null), itemStyle: { color: css("--warn") }, tooltip: { valueFormatter: index } },
     ],
   });
 
@@ -176,13 +195,13 @@ export default async function product(root, [code], params) {
   if (current.world) {
     const share = Object.fromEntries(ranked.map((s) => [s.countryCode, s.share]));
     const exporters = table(root.querySelector("#exporters"), {
-      data: current.world.topExporters.map((e) => ({ ...e, tunisia: share[e.countryCode] ?? 0 })),
+      data: current.world.topExporters.map((e) => ({ ...e, reporter: share[e.countryCode] ?? 0 })),
       pagination: false,
-      rowFormatter: (row) => row.getData().tunisia === 0 && row.getElement().classList.add("untapped"),
+      rowFormatter: (row) => row.getData().reporter === 0 && row.getElement().classList.add("untapped"),
       columns: [
         { title: t("Country"), field: "countryName", minWidth: 140 },
         pctColumn(t("Share of world exports"), "share"),
-        pctColumn(t("Share of Tunisia's imports"), "tunisia"),
+        pctColumn(t("Share of imports"), "reporter"),
       ],
     });
     exporters.on("rowClick", (_, row) => profile(row.getData().countryCode));
@@ -195,7 +214,6 @@ export default async function product(root, [code], params) {
       columns: [
         { title: t("Code"), field: "productCode", width: 90 },
         { title: t("Product"), field: "description", tooltip: true },
-        { title: t("Years imported"), field: "importYears", formatter: (c) => t("{count} of {total}", { count: c.getValue().length, total: data.years.length }), width: 170 },
       ],
     });
     members.on("rowClick", (_, row) => (location.hash = `#/product/${row.getData().productCode}?year=${current.year}`));
@@ -209,6 +227,8 @@ async function search(root, q) {
       <p class="lede">${t("Search by HS code (2, 4 or 6 digits) or by words in the description. A 2 or 4 digit code opens the whole chapter or heading.")}</p>
       <form class="controls"><label>${t("Product")} <input name="q" type="search" value="${esc(q)}" placeholder="1001, wheat, fertilizers" autofocus></label></form>
     </div>
+    <div class="panel"><h2>${t("Chapters, headings and products")}</h2>
+      <p>${t("The Harmonized System files every good under a six digit code. The first two digits are its chapter, such as 10 for cereals. The first four are its heading, such as 1001 for wheat and meslin. All six are the product, such as 100119 for durum wheat other than seed, the finest level BACI records.")}</p></div>
     <div class="panel"><h2>${t("Case studies")}</h2><p>${CASE_STUDIES.map(([c, label]) => `<a href="#/product/${c}">${esc(t(label))}</a>`).join(" · ")}</p></div>
     <div class="panel"><h2>${t("Matches")}</h2><div id="matches"></div></div>
   `));
@@ -219,7 +239,7 @@ async function search(root, q) {
     columns: [
       { title: t("Code"), field: "productCode", width: 90 },
       { title: t("Product"), field: "description", tooltip: true },
-      { title: t("Years imported"), field: "importYears", formatter: (c) => String(c.getValue().length), width: 170 },
+      { title: t("Heading"), field: "heading", width: 110 },
     ],
   });
   matches.on("rowClick", (_, row) => (location.hash = `#/product/${row.getData().productCode}`));
