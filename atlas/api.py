@@ -111,6 +111,12 @@ def names_of(snapshot):
     return {c["countryCode"]: c for c in snapshot["countries"]}
 
 
+def geography(db, snapshot_id, reporter):
+    """{partner code: distance, border and language} from CEPII GeoDist, empty when the snapshot has none."""
+    found = db.geo_pairs.find({"snapshotId": snapshot_id, "countryCode": reporter}, {"_id": 0, "snapshotId": 0, "countryCode": 0})
+    return {g.pop("partnerCode"): g for g in found}
+
+
 @app.get("/api/snapshots")
 def list_snapshots(db: Db):
     return list(db.snapshots.find({"status": "ready"}, {"countries": 0, "files": 0, "errors.samples": 0}).sort("_id", -1))
@@ -242,7 +248,10 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
             "world": world,
             "exports": exports,
         })
-    return {"snapshot": snapshot_id, "reporter": reporter, "code": code, "products": products, "years": years}
+    return {
+        "snapshot": snapshot_id, "reporter": reporter, "code": code, "products": products, "years": years,
+        "geography": geography(db, snapshot_id, reporter),
+    }
 
 
 @app.get("/api/countries/{country_code}")
@@ -298,6 +307,7 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
     route = routes.route(home["isoCode"], country["isoCode"])
     return {
         "snapshot": snapshot_id, "reporter": home, "year": year, "country": country, "years": years, "products": products,
+        "geography": geography(db, snapshot_id, reporter).get(country_code),
         "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]}
         if route else None,
     }
@@ -379,9 +389,10 @@ def exports(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | Non
         for y in snapshot["years"]
     ]
     chosen = by_year.get(year)
+    geo = geography(db, snapshot_id, reporter)
     destinations = [
         {**{k: names[d["countryCode"]][k] for k in ("countryCode", "countryName", "isoCode")}, "valueUsd": d["valueUsd"],
-         "share": d["valueUsd"] / chosen["exportsUsd"]}
+         "share": d["valueUsd"] / chosen["exportsUsd"], **geo.get(d["countryCode"], {})}
         for d in chosen["destinations"]
     ] if chosen else []
     found = db.country_product_years.find(

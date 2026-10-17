@@ -4,7 +4,8 @@ from decimal import Decimal
 import pytest
 
 from atlas import materialize
-from atlas.prepare import DATA, PrepareFailed, prepare, read_gdp
+from atlas.prepare import DATA, PrepareFailed, prepare, read_gdp, read_geography
+from tests.test_coverage import STATA_MISSING, write_dta
 
 FLOWS = {
     2012: [
@@ -192,3 +193,54 @@ def test_prody_and_expy_use_same_year_income(db, make_archive, tmp_path):
     assert italy["expy"]["value"] == expected
     assert italy["expyFixed2012"]["value"] == expected
     assert snapshot["gdp"]["countries"] == 4
+
+
+GEO_COLUMNS = [("iso3", 3), ("landlocked", 251)]
+DIST_COLUMNS = [("iso_o", 3), ("iso_d", 3), ("dist", 255), ("contig", 251), ("comlang_off", 251)]
+
+
+def geo_files(tmp_path, geo_rows, dist_rows):
+    paths = tmp_path / "geo_cepii.dta", tmp_path / "dist_cepii.dta"
+    write_dta(paths[0], GEO_COLUMNS, geo_rows)
+    write_dta(paths[1], DIST_COLUMNS, dist_rows)
+    return paths
+
+
+def fixture_geography(tmp_path):
+    """France and Italy at their GeoDist distances from Tunisia, and Afghanistan landlocked."""
+    return geo_files(
+        tmp_path,
+        [("FRA", 0), ("ITA", 0), ("TUN", 0), ("AFG", 1)],
+        [("TUN", "FRA", 1500.6, 0, 1), ("FRA", "TUN", 1500.6, 0, 1), ("TUN", "ITA", 594.2, 0, 0), ("ITA", "TUN", 594.2, 0, 0)],
+    )
+
+
+def test_geography_maps_aliases_and_skips_pairs_inside_one_entity(tmp_path):
+    paths = geo_files(
+        tmp_path,
+        [("FRA", 0), ("FRA", 0), ("YUG", 1), ("TUN", 0)],
+        [("FRA", "YUG", 1400.4, 0, 0), ("YUG", "YUG", 300.0, 0, 1), ("FRA", "FRA", 100.0, 0, 1),
+         ("FRA", "TUN", 1500.6, 0, 1), ("TUN", "YUG", STATA_MISSING, 0, 0), ("FRA", "ITA", 1100.0, 1, 0)],
+    )
+    country_rows = [{"country_code": c, "country_iso3": i} for c, i in [("251", "FRA"), ("688", "SRB"), ("499", "MNE"), ("788", "TUN"), ("842", "USA")]]
+    pairs, landlocked, provenance = read_geography(*paths, country_rows)
+    assert pairs[251, 688] == pairs[251, 499] == {"distanceKm": 1400, "contiguous": False, "commonLanguage": False}
+    assert pairs[251, 788] == {"distanceKm": 1501, "contiguous": False, "commonLanguage": True}
+    assert set(pairs) == {(251, 688), (251, 499), (251, 788)}
+    assert landlocked == {251: False, 688: True, 499: True, 788: False}
+    assert (provenance["countries"], provenance["unmatched"]) == (4, [842])
+
+
+def test_geography_changes_the_snapshot_id_and_is_stored_per_pair(db, make_archive, tmp_path):
+    without = prepare(make_archive(FLOWS), db)
+    snapshot = prepare(make_archive(FLOWS), db, geo_paths=fixture_geography(tmp_path))
+    assert snapshot["_id"] != without["_id"]
+    assert db.geo_pairs.count_documents({"snapshotId": without["_id"]}) == 0
+    assert db.geo_pairs.count_documents({"snapshotId": snapshot["_id"]}) == 4
+    pair = db.geo_pairs.find_one({"snapshotId": snapshot["_id"], "countryCode": 788, "partnerCode": 251}, {"_id": 0, "distanceKm": 1})
+    assert pair == {"distanceKm": 1501}
+    assert {c["isoCode"]: c["landlocked"] for c in snapshot["countries"]} == {
+        "AFG": True, "CHN": None, "FRA": False, "ITA": False, "TUN": False, "USA": None,
+    }
+    assert snapshot["geography"]["unmatched"] == [156, 842]
+    assert snapshot["manifest"]["geodistSha256"] == [f["sha256"] for f in snapshot["geography"]["files"]]

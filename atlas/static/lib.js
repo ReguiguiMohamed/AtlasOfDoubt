@@ -47,6 +47,7 @@ const tonnes = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
 const percent = [0, 1, 2].map((d) => new Intl.NumberFormat(lang, { style: "percent", minimumFractionDigits: d, maximumFractionDigits: d }));
 const hhi = new Intl.NumberFormat(lang, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const whole = new Intl.NumberFormat(lang);
+const kilometres = new Intl.NumberFormat(lang, { style: "unit", unit: "kilometer", maximumFractionDigits: 0 });
 
 export const usd = (v) => (v == null ? t("n/a") : compactUsd.format(v));
 export const usdFull = (v) => (v == null ? t("n/a") : fullUsd.format(v));
@@ -54,6 +55,8 @@ export const pct = (v, digits = 1) => (v == null ? t("n/a") : percent[digits].fo
 export const index = (v) => (v == null ? t("n/a") : hhi.format(v));
 export const tons = (v) => (v == null ? t("n/a") : `${tonnes.format(v)} t`);
 export const count = (v) => whole.format(v);
+export const km = (v) => (v == null ? t("n/a") : kilometres.format(v));
+const yesNo = (v) => (v == null ? t("n/a") : t(v ? "Yes" : "No"));
 
 const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => entities[c]);
@@ -142,6 +145,13 @@ export const usdColumn = numeric(usd);
 export const pctColumn = numeric(pct);
 export const indexColumn = numeric(index);
 export const tonsColumn = numeric(tons);
+
+// GeoDist columns for a partner table, left out when the snapshot was prepared without GeoDist.
+export const geoColumns = () => (state.snapshot.geography ? [
+  numeric(km)(t("Distance"), "distanceKm", { width: 110 }),
+  { title: t("Border"), field: "contiguous", width: 90, formatter: (c) => yesNo(c.getValue()) },
+  { title: t("Language"), field: "commonLanguage", width: 100, formatter: (c) => yesNo(c.getValue()) },
+] : []);
 
 // Tabulator's own header filter waits for keyup, so pasted or autofilled text never filtered.
 export function countryPicker(node, countries, pick) {

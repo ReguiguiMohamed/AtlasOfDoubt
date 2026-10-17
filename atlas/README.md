@@ -9,7 +9,7 @@ process.
 | --- | --- | --- |
 | [`metrics.py`](metrics.py) | preparation and every request | totals, shares, top-3 share, HHI, group merging, RCA, unit values and their quality flags, PRODY, EXPY and the disruption scenario |
 | [`db.py`](db.py) | both | connects with Decimal stored as Decimal128 and creates the indexes |
-| [`prepare.py`](prepare.py) | once per release | checks the 13 annual files in DuckDB, writes flows as Parquet by importer and year, stores world and country-year aggregates, writes the error report |
+| [`prepare.py`](prepare.py) | once per release | checks the 13 annual files in DuckDB, writes flows as Parquet by importer and year, stores world and country-year aggregates and the CEPII GeoDist pairs, writes the error report |
 | [`coverage.py`](coverage.py) | before adding tariffs or geography | matches the WITS/TRAINS schedule list and CEPII GeoDist to BACI's countries and writes `coverage.csv` with each country's tariff years, HS revision and geography |
 | [`materialize.py`](materialize.py) | first visit to a country | builds that country's import and export view from its Parquet partition into MongoDB, under a lease, and evicts the least recently used views |
 | [`routes.py`](routes.py) | every request | the modelled sea lane from each partner region to the reporter and the chokepoints on it |
@@ -71,10 +71,10 @@ link opens on the same one. Without it the app asks for a country first.
 | Route | View |
 | --- | --- |
 | `#/overview?year&minValue` | every product the reporter imported in a year with its concentration, the "Choice or structure?" quadrant of its HHI against the world's and the products whose HHI rose or fell the most since an earlier year |
-| `#/exports?year&minValue` | exports and imports from 2012 to 2024, product and destination HHI, EXPY when GDP was prepared, destinations, and each product with its world share, RCA, unit value and quality flags |
-| `#/country` and `#/country/{code}?year` | every partner country with a search box, then one partner: its modelled sea route, what it supplied and bought back each year, the products it supplies and its rank among their suppliers |
+| `#/exports?year&minValue` | exports and imports from 2012 to 2024, product and destination HHI, EXPY when GDP was prepared, destinations with their distance, border and language, and each product with its world share, RCA, unit value and quality flags |
+| `#/country` and `#/country/{code}?year` | every partner country with a search box, then one partner: its distance in km between the most populated cities, a shared border or official language, whether it is landlocked, its modelled sea route, what it supplied and bought back each year, the products it supplies and its rank among their suppliers |
 | `#/routes?year&code&select` | supplier value summed per sea route and per chokepoint on a map, for all products or one code, with a detail panel for the selected route or strait: trend, countries, the products most exposed and a link to simulate its closure |
-| `#/product/{code}?year` | one product, heading or chapter: supplier bars and table, imports, exports, RCA and HHI from 2012 to 2024, supplier shares over time, for one product the largest world exporters against what each sent the reporter, and a link to its sea routes |
+| `#/product/{code}?year` | one product, heading or chapter: supplier bars and a table with each supplier's distance, border and language, imports, exports, RCA and HHI from 2012 to 2024, supplier shares over time, for one product the largest world exporters against what each sent the reporter, and a link to its sea routes |
 | `#/scenario?mode&code&year&suppliers&reduction` | product or supplier-country disruption, previewed live, saved as a report |
 | `#/reports` and `#/reports/{id}` | the reporter's saved reports with provenance, limitations, CSV download and a print layout that keeps every table row |
 
@@ -102,7 +102,7 @@ reporter.
 
 ## Tests
 
-`pytest -q` runs 70 tests against a local MongoDB on port 27017. CI starts a
+`pytest -q` runs 73 tests against a local MongoDB on port 27017. CI starts a
 MongoDB 9.0 service for them.
 
 | Guarantee | Tests |
@@ -121,4 +121,5 @@ MongoDB 9.0 service for them.
 | Shifts count only products over the minimum value in both years | `test_api.py::test_movers_need_the_minimum_value_in_both_years` |
 | Reports ignore browser numbers and survive a new snapshot | `test_api.py::test_report_ignores_numbers_sent_by_the_browser`, `::test_report_is_unchanged_after_another_snapshot_is_added` |
 | WITS and GeoDist codes, and the EU's shared schedule, reach the right BACI country, and a member's own schedule wins | `test_coverage.py::test_coverage_maps_source_codes_and_eu_schedules_to_baci` |
+| GeoDist reaches BACI countries through its older codes, never pairs two countries inside one GeoDist entity, and reaches the partner views | `test_prepare.py::test_geography_maps_aliases_and_skips_pairs_inside_one_entity`, `::test_geography_changes_the_snapshot_id_and_is_stored_per_pair`, `test_api.py::test_partner_views_carry_geodist_distance_border_and_language` |
 | Route and chokepoint totals are sums of their countries, and routes follow the reporter | `test_api.py::test_routes_sum_countries_into_routes_and_chokepoints`, `::test_routes_follow_the_reporter`, `::test_the_route_depends_on_the_reporter` |

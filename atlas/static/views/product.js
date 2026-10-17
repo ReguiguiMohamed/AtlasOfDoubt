@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, index, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, chart, count, css, esc, geoColumns, html, index, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
 
 const CASE_STUDIES = [
   ["10", "Cereals (chapter 10)"],
@@ -95,7 +95,7 @@ export default async function product(root, [code], params) {
   bars.on("click", (p) => profile(shown[p.dataIndex].countryCode));
 
   const suppliers = table(root.querySelector("#suppliers"), {
-    data: ranked,
+    data: ranked.map((s) => ({ ...s, ...data.geography[s.countryCode] })),
     paginationSize: 12,
     columns: [
       { title: t("Country"), field: "countryName", minWidth: 140 },
@@ -103,6 +103,7 @@ export default async function product(root, [code], params) {
       usdColumn(t("Imports"), "valueUsd"),
       pctColumn(t("Share"), "share"),
       ...(single ? [tonsColumn(t("Tonnes"), "quantityTonnes")] : []),
+      ...geoColumns(),
     ],
   });
   suppliers.on("rowClick", (_, row) => profile(row.getData().countryCode));

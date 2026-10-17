@@ -32,6 +32,7 @@ def connect():
     db.products.create_index([("snapshotId", 1), ("productCode", 1)], unique=True)
     db.world_product_years.create_index([("snapshotId", 1), ("productCode", 1), ("year", 1)], unique=True)
     db.country_years.create_index([("snapshotId", 1), ("countryCode", 1), ("year", 1)], unique=True)
+    db.geo_pairs.create_index([("snapshotId", 1), ("countryCode", 1), ("partnerCode", 1)], unique=True)
     db.materializations.create_index([("snapshotId", 1), ("countryCode", 1)], unique=True)
     cache = db.country_product_years
     cache.create_index([("generationId", 1), ("productCode", 1), ("year", 1)], unique=True)

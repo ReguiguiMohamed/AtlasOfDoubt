@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from atlas import materialize, routes
 from atlas.api import app
 from atlas.prepare import prepare
-from tests.test_prepare import FLOWS
+from tests.test_prepare import FLOWS, fixture_geography
 
 TUNISIA, USA, CHINA = 788, 842, 156
 
@@ -351,3 +351,17 @@ def test_a_build_whose_lease_expired_is_taken_over(db, two):
     db.country_product_years.insert_one({"generationId": "stale", "productCode": "010121", "year": 2012})
     assert materialize.ensure(db, snapshot, TUNISIA) != "stale"
     assert db.country_product_years.count_documents({"generationId": "stale"}) == 0
+
+
+def test_partner_views_carry_geodist_distance_border_and_language(db, make_archive, tmp_path):
+    snapshot = prepare(make_archive(FLOWS), db, geo_paths=fixture_geography(tmp_path))
+    params = {"snapshot": snapshot["_id"], "reporter": TUNISIA, "year": 2012}
+    with TestClient(app) as client:
+        france = client.get("/api/countries/251", params=params).json()
+        usa = client.get("/api/countries/842", params=params).json()
+        destinations = client.get("/api/exports", params=params).json()["destinations"]
+        history = client.get("/api/products/010121/history", params=params).json()
+    assert france["geography"] == {"distanceKm": 1501, "contiguous": False, "commonLanguage": True}
+    assert usa["geography"] is None
+    assert [(d["isoCode"], d["distanceKm"], d["commonLanguage"]) for d in destinations] == [("FRA", 1501, True)]
+    assert {k: v["distanceKm"] for k, v in history["geography"].items()} == {"251": 1501, "380": 594}

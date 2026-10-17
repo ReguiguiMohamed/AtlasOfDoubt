@@ -11,14 +11,12 @@ schedule's HS revision and whether GeoDist has the country and its pairs.
 
 import csv
 import re
-import struct
 import sys
-import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter, defaultdict
 
-from atlas.prepare import DATA, YEARS, PrepareFailed, read_dictionary
+from atlas.prepare import DATA, GEO_ALIASES, YEARS, download, read_dictionary, read_dta
 
 SOURCES = {
     "wits-trains-availability.xml": "https://wits.worldbank.org/API/V1/wits/datasource/trn/dataavailability/country/all/year/all",
@@ -29,49 +27,10 @@ WITS = {"w": "http://wits.worldbank.org"}
 
 # Codes a source uses where BACI has another. BACI files Taiwan as S19, "Other Asia, nes".
 WITS_ALIASES = {"MNT": ["MNE"], "ROM": ["ROU"], "SER": ["SRB"], "SUD": ["SDN"], "TMP": ["TLS"], "TWN": ["S19"], "ZAR": ["COD"]}
-# GeoDist predates the split of Serbia and Montenegro, so both take YUG's geography.
-GEO_ALIASES = {"PAL": ["PSE"], "ROM": ["ROU"], "TMP": ["TLS"], "TWN": ["S19"], "YUG": ["SRB", "MNE"], "ZAR": ["COD"]}
 
 # The EU files one schedule, EUN, for its members. A member's own schedule for the same year wins.
 EU = "AUT BEL BGR CYP CZE DEU DNK ESP EST FIN FRA GRC HRV HUN IRL ITA LTU LUX LVA MLT NLD POL PRT ROU SVK SVN SWE".split()
 LEFT_EU = {"GBR": 2020}
-
-# Stata type byte: struct format, size, and the largest value that is not a missing code.
-STATA_NUMBERS = {251: ("b", 1, 100), 252: ("h", 2, 32740), 253: ("i", 4, 2147483620), 254: ("f", 4, 1.701e38), 255: ("d", 8, 8.988e307)}
-
-
-def read_dta(path):
-    """Rows of a Stata format 113 file, the format GeoDist ships, with missing numbers as None."""
-    data = path.read_bytes()
-    if data[0] != 113:
-        raise PrepareFailed(f"{path.name} is Stata format {data[0]}, only 113 is read")
-    order = "<" if data[1] == 2 else ">"
-    nvar, nobs = struct.unpack_from(order + "Hi", data, 4)
-    types = data[109:109 + nvar]
-    pos = 109 + nvar
-    names = [data[pos + 33 * i:pos + 33 * (i + 1)].split(b"\0")[0].decode() for i in range(nvar)]
-    # Skip names, sort order, formats, value labels and variable labels, then the expansion fields.
-    pos += 33 * nvar + 2 * (nvar + 1) + 12 * nvar + 33 * nvar + 81 * nvar
-    while True:
-        kind, length = struct.unpack_from(order + "Bi", data, pos)
-        pos += 5 + length
-        if (kind, length) == (0, 0):
-            break
-    rows = []
-    for _ in range(nobs):
-        row = {}
-        for name, t in zip(names, types):
-            if t <= 244:
-                row[name] = data[pos:pos + t].split(b"\0")[0].decode("latin-1")
-                pos += t
-            else:
-                fmt, size, top = STATA_NUMBERS[t]
-                value = struct.unpack_from(order + fmt, data, pos)[0]
-                row[name] = None if value > top else value
-                pos += size
-        rows.append(row)
-    return rows
-
 
 def read_wits(path):
     """{BACI ISO3: {year: (source ISO3, HS revision, preferential agreements)}} for BACI's years."""
@@ -133,13 +92,8 @@ def matrix(country_rows, schedules, geo_rows, dist_rows):
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    DATA.mkdir(parents=True, exist_ok=True)
     for name, url in SOURCES.items():
-        if not (DATA / name).exists():
-            print(f"Downloading {url}", flush=True)
-            # WITS answers 403 to urllib's default User-Agent.
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "AtlasOfDoubt"}), timeout=120) as response:
-                (DATA / name).write_bytes(response.read())
+        download(url, DATA / name)
     release = re.search(r"_V(\d+)\.zip$", sys.argv[1])[1]
     with zipfile.ZipFile(sys.argv[1]) as archive:
         country_rows = read_dictionary(archive, f"country_codes_V{release}.csv", ["country_code", "country_name", "country_iso3"])

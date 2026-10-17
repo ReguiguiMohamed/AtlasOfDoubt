@@ -12,8 +12,8 @@ A concentrated supplier list is a choice when the world market is open and a con
 
 ## How it works
 
-1. **Prepare.** `python -m atlas.prepare` checks the 13 yearly files of a BACI release in DuckDB, writes the valid flows once as Parquet partitioned by importer and year, and stores world totals, country-year summaries, RCA inputs and PRODY in MongoDB. An optional World Bank GDP file adds PRODY and EXPY.
-2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release or GDP file lands beside the old one without changing numbers a report already cites.
+1. **Prepare.** `python -m atlas.prepare` checks the 13 yearly files of a BACI release in DuckDB, writes the valid flows once as Parquet partitioned by importer and year, and stores world totals, country-year summaries, RCA inputs and PRODY in MongoDB. An optional World Bank GDP file adds PRODY and EXPY, and the CEPII GeoDist files add the distance, a shared border and a common official language for each country pair.
+2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release, GDP or GeoDist file lands beside the old one without changing numbers a report already cites.
 3. **Materialize.** The first visit to a country builds its view from its own Parquet partition into MongoDB, as one generation that becomes readable only when complete. The least recently used countries are evicted past a 1 GB budget and rebuilt with the same figures.
 4. **Measure.** One module, `atlas/metrics.py`, computes totals, shares, HHI, RCA, PRODY, EXPY and the scenario. Preparation, the API and saved reports all call it.
 5. **Explore and stress test.** The web app shows imports, exports, products, partner countries and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
@@ -31,7 +31,7 @@ flowchart LR
 
 ## Run it
 
-Both paths need the BACI archive in `data/raw/`. Prepare fetches the World Bank GDP file on its first run and keeps it in `data/snapshots/wdi-gdp.json`:
+Both paths need the BACI archive in `data/raw/`. Prepare fetches the World Bank GDP file and the two CEPII GeoDist files on its first run and keeps them in `data/snapshots/`:
 
 ```bash
 curl -L --create-dirs -o data/raw/BACI_HS12_V202601.zip https://www.cepii.fr/DATA_DOWNLOAD/baci/data/BACI_HS12_V202601.zip
@@ -91,7 +91,7 @@ Python 3.12, FastAPI 0.143.3, PyMongo 4.19.0, DuckDB 1.5.6, MongoDB 9.0, ECharts
 
 ## Data
 
-[CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), HS 2012 nomenclature, release V202601, under the Etalab Open License 2.0. GDP per capita, PPP, constant 2021 dollars, from the [World Bank WDI](https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD) under CC BY 4.0. The archive and the prepared files stay out of git and out of the image.
+[CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), HS 2012 nomenclature, release V202601, under the Etalab Open License 2.0. GDP per capita, PPP, constant 2021 dollars, from the [World Bank WDI](https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD) under CC BY 4.0. Distances, borders, languages and landlocked status from [CEPII GeoDist](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=6) under the Etalab Open License 2.0, with the distance taken between the most populated cities (Mayer and Zignago, 2011). The archive and the prepared files stay out of git and out of the image.
 
 ## License
 

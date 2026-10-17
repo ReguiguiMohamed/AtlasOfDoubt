@@ -1,5 +1,5 @@
 import { lang, t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, index, indexColumn, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, index, indexColumn, geoColumns, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
 
 const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 const BARS = 15;
@@ -104,6 +104,7 @@ export default async function exports(root, _, params) {
       { title: t("ISO"), field: "isoCode", width: 70 },
       usdColumn(t("Exports"), "valueUsd"),
       pctColumn(t("Share"), "share"),
+      ...geoColumns(),
     ],
   }).on("rowClick", (_, row) => profile(row.getData().countryCode));
 

@@ -2,9 +2,10 @@
 
     python -m atlas.prepare data/raw/BACI_HS12_V202601.zip [wdi-gdp.json]
 
-The GDP file defaults to data/snapshots/wdi-gdp.json and is downloaded from
-the World Bank when it is missing, then kept, so later runs reuse the same
-file and the same snapshot id. Delete it to fetch newer GDP figures.
+The GDP file defaults to data/snapshots/wdi-gdp.json and the CEPII GeoDist
+files to geo_cepii.dta and dist_cepii.dta beside it. Each is downloaded when
+missing, then kept, so later runs reuse the same files and the same snapshot
+id. Delete one to fetch newer figures.
 
 Each annual CSV is checked in DuckDB. Valid flows are written once as Parquet
 partitioned by importer and year, so one country's imports never need a scan
@@ -22,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 import tempfile
 import urllib.request
@@ -44,6 +46,13 @@ LAYOUT_VERSION = "1"
 DATA = Path(os.environ.get("ATLAS_DATA", "data/snapshots"))
 GDP_INDICATOR = "NY.GDP.PCAP.PP.KD"
 GDP_URL = f"https://api.worldbank.org/v2/country/all/indicator/{GDP_INDICATOR}?format=json&date=2012:2024&per_page=20000"
+GEO_URL = "https://www.cepii.fr/distance/geo_cepii.dta"
+DIST_URL = "https://www.cepii.fr/distance/dist_cepii.dta"
+GEO_CITATION = "Mayer, T. and Zignago, S. (2011). Notes on CEPII's distances measures: the GeoDist Database. CEPII Working Paper, N°2011-25."
+# GeoDist predates the split of Serbia and Montenegro, so both take YUG's geography. BACI files Taiwan as S19.
+GEO_ALIASES = {"PAL": ["PSE"], "ROM": ["ROU"], "TMP": ["TLS"], "TWN": ["S19"], "YUG": ["SRB", "MNE"], "ZAR": ["COD"]}
+# Stata type byte: struct format, size, and the largest value that is not a missing code.
+STATA_NUMBERS = {251: ("b", 1, 100), 252: ("h", 2, 32740), 253: ("i", 4, 2147483620), 254: ("f", 4, 1.701e38), 255: ("d", 8, 8.988e307)}
 CITATION = (
     "Gaulier, G. and Zignago, S. (2010). BACI: International Trade Database at the "
     "Product-Level. The 1994-2007 Version. CEPII Working Paper, N°2010-23."
@@ -134,6 +143,102 @@ def read_dictionary(archive, name, columns):
         return [{c: row[c].strip() for c in columns} for row in reader]
 
 
+def download(url, path):
+    """Fetch url into path unless the file is already there."""
+    if path.exists():
+        return
+    print(f"Downloading {url} to {path}", flush=True)
+    # WITS answers 403 to urllib's default User-Agent.
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "AtlasOfDoubt"}), timeout=120) as response:
+        body = response.read()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+
+
+def iso3_codes(country_rows):
+    codes = defaultdict(list)
+    for r in country_rows:
+        codes[r["country_iso3"]].append(int(r["country_code"]))
+    return codes
+
+
+def read_dta(path):
+    """Rows of a Stata format 113 file, the format GeoDist ships, with missing numbers as None."""
+    path = Path(path)
+    data = path.read_bytes()
+    if data[0] != 113:
+        raise PrepareFailed(f"{path.name} is Stata format {data[0]}, only 113 is read")
+    order = "<" if data[1] == 2 else ">"
+    nvar, nobs = struct.unpack_from(order + "Hi", data, 4)
+    types = data[109:109 + nvar]
+    pos = 109 + nvar
+    names = [data[pos + 33 * i:pos + 33 * (i + 1)].split(b"\0")[0].decode() for i in range(nvar)]
+    # Skip names, sort order, formats, value labels and variable labels, then the expansion fields.
+    pos += 33 * nvar + 2 * (nvar + 1) + 12 * nvar + 33 * nvar + 81 * nvar
+    while True:
+        kind, length = struct.unpack_from(order + "Bi", data, pos)
+        pos += 5 + length
+        if (kind, length) == (0, 0):
+            break
+    rows = []
+    for _ in range(nobs):
+        row = {}
+        for name, t in zip(names, types):
+            if t <= 244:
+                row[name] = data[pos:pos + t].split(b"\0")[0].decode("latin-1")
+                pos += t
+            else:
+                fmt, size, top = STATA_NUMBERS[t]
+                value = struct.unpack_from(order + fmt, data, pos)[0]
+                row[name] = None if value > top else value
+                pos += size
+        rows.append(row)
+    return rows
+
+
+def read_geography(geo_path, dist_path, country_rows):
+    """GeoDist as {(BACI code, BACI code): pair fields} and {BACI code: landlocked}, with its provenance.
+
+    Countries match by ISO3, through GEO_ALIASES where GeoDist keeps an older code.
+    The distance is between the two countries' most populated cities, the one
+    measure GeoDist gives for every pair. Two BACI countries sharing one GeoDist
+    entity, such as Serbia and Montenegro under YUG, get no pair, because GeoDist
+    only has the distance inside that entity.
+    """
+    codes = iso3_codes(country_rows)
+
+    def baci(iso3):
+        return [c for alias in GEO_ALIASES.get(iso3, [iso3]) for c in codes.get(alias, [])]
+
+    landlocked = {}
+    for r in read_dta(geo_path):
+        for code in baci(r["iso3"]):
+            landlocked.setdefault(code, bool(r["landlocked"]))
+    pairs = {}
+    for r in read_dta(dist_path):
+        if r["iso_o"] == r["iso_d"] or r["dist"] is None:
+            continue
+        fields = {"distanceKm": round(r["dist"]), "contiguous": bool(r["contig"]), "commonLanguage": bool(r["comlang_off"])}
+        for a in baci(r["iso_o"]):
+            for b in baci(r["iso_d"]):
+                pairs[a, b] = fields
+    provenance = {
+        "name": "CEPII GeoDist",
+        "url": "https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=6",
+        "citation": GEO_CITATION,
+        "license": "Etalab Open License 2.0",
+        "distance": "great-circle distance between the most populated cities, km",
+        "files": [
+            {"filename": p.name, "sha256": sha256(p), "bytes": p.stat().st_size,
+             "retrievedAt": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc)}
+            for p in map(Path, (geo_path, dist_path))
+        ],
+        "countries": len(landlocked),
+        "unmatched": sorted(int(r["country_code"]) for r in country_rows if int(r["country_code"]) not in landlocked),
+    }
+    return pairs, landlocked, provenance
+
+
 def read_gdp(path, country_rows):
     """WDI GDP per capita as {BACI code: {year: value}}, with its provenance.
 
@@ -146,9 +251,7 @@ def read_gdp(path, country_rows):
         meta, rows = json.load(f, parse_float=Decimal, parse_int=Decimal)
     if meta["pages"] != 1:
         raise PrepareFailed(f"{path.name} holds page 1 of {meta['pages']}, download it with per_page=20000")
-    codes = defaultdict(list)
-    for r in country_rows:
-        codes[r["country_iso3"]].append(int(r["country_code"]))
+    codes = iso3_codes(country_rows)
     gdp, left_out = defaultdict(dict), set()
     for r in rows:
         if r["indicator"]["id"] != GDP_INDICATOR:
@@ -277,7 +380,7 @@ def write_manifest(out):
     return {"files": len(files), "bytes": sum(f["bytes"] for f in files), "manifestSha256": sha256(manifest)}
 
 
-def prepare(path, db, gdp_path=None):
+def prepare(path, db, gdp_path=None, geo_paths=None):
     path = Path(path)
     match = re.fullmatch(r"BACI_(HS\d\d)_V(\d+)\.zip", path.name)
     if not match:
@@ -285,13 +388,17 @@ def prepare(path, db, gdp_path=None):
     classification, release = match.groups()
     baci_sha = sha256(path)
     gdp_sha = sha256(gdp_path) if gdp_path else None
+    geo_shas = [sha256(p) for p in geo_paths] if geo_paths else None
     inputs = f"{baci_sha} {gdp_sha} {metrics.CALCULATION_VERSION} {LAYOUT_VERSION}"
+    # Appended only when present, so a snapshot prepared without GeoDist keeps its id.
+    if geo_shas:
+        inputs += " " + " ".join(geo_shas)
     snapshot_id = f"{path.stem}@{hashlib.sha256(inputs.encode()).hexdigest()[:12]}"
 
     existing = db.snapshots.find_one({"_id": snapshot_id})
     if existing and existing["status"] == "ready":
         return existing
-    for collection in (db.products, db.world_product_years, db.country_years):
+    for collection in (db.products, db.world_product_years, db.country_years, db.geo_pairs):
         collection.delete_many({"snapshotId": snapshot_id})
 
     snapshot = {
@@ -316,6 +423,7 @@ def prepare(path, db, gdp_path=None):
         "manifest": {
             "baciSha256": baci_sha,
             "gdpSha256": gdp_sha,
+            "geodistSha256": geo_shas,
             "calculationVersion": metrics.CALCULATION_VERSION,
             "layoutVersion": LAYOUT_VERSION,
         },
@@ -337,6 +445,7 @@ def prepare(path, db, gdp_path=None):
             product_rows = read_dictionary(archive, f"product_codes_{classification}_V{release}.csv", ["code", "description"])
             products = {r["code"].zfill(6): r["description"] for r in product_rows}
             gdp, gdp_provenance = read_gdp(gdp_path, country_rows) if gdp_path else ({}, None)
+            pairs, landlocked, geo_provenance = read_geography(*geo_paths, country_rows) if geo_paths else ({}, {}, None)
             # The fixed-2012 sensitivity uses only countries with income in every year, so coverage cannot move it.
             common = {c for c, by_year in gdp.items() if set(YEARS) <= by_year.keys()}
 
@@ -367,6 +476,11 @@ def prepare(path, db, gdp_path=None):
                 ],
                 ordered=False,
             )
+            if pairs:
+                db.geo_pairs.insert_many(
+                    [{"snapshotId": snapshot_id, "countryCode": a, "partnerCode": b, **f} for (a, b), f in sorted(pairs.items())],
+                    ordered=False,
+                )
         storage = {"path": snapshot_id, **write_manifest(out)}
         shutil.rmtree(final, ignore_errors=True)
         os.replace(out, final)
@@ -380,8 +494,10 @@ def prepare(path, db, gdp_path=None):
         "status": "ready",
         "preparedAt": datetime.now(timezone.utc),
         "gdp": gdp_provenance,
+        "geography": geo_provenance,
         "countries": [
-            {"countryCode": int(r["country_code"]), "countryName": r["country_name"], "isoCode": r["country_iso3"], "iso2": iso2[r["country_code"]]}
+            {"countryCode": int(r["country_code"]), "countryName": r["country_name"], "isoCode": r["country_iso3"],
+             "iso2": iso2[r["country_code"]], "landlocked": landlocked.get(int(r["country_code"]))}
             for r in sorted(country_rows, key=lambda r: r["country_name"])
         ],
         "worldTotals": world_totals,
@@ -405,13 +521,11 @@ if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         sys.exit(__doc__)
     gdp_path = Path(sys.argv[2]) if len(sys.argv) == 3 else DATA / "wdi-gdp.json"
-    if not gdp_path.exists():
-        print(f"Downloading {GDP_INDICATOR} to {gdp_path}", flush=True)
-        with urllib.request.urlopen(GDP_URL, timeout=120) as response:
-            body = response.read()
-        gdp_path.parent.mkdir(parents=True, exist_ok=True)
-        gdp_path.write_bytes(body)
+    download(GDP_URL, gdp_path)
+    geo_paths = (DATA / "geo_cepii.dta", DATA / "dist_cepii.dta")
+    for url, geo_path in zip((GEO_URL, DIST_URL), geo_paths):
+        download(url, geo_path)
     client, database = connect()
     with client:
-        result = prepare(sys.argv[1], database, gdp_path)
+        result = prepare(sys.argv[1], database, gdp_path, geo_paths)
     print(f"{result['_id']} {result['status']}: {result['counts']}, {result['errors']['rejectedRows']} rows rejected")

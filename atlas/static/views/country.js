@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, countryPicker, css, esc, html, index, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, countryPicker, css, esc, html, index, km, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
 
 export default async function country(root, [code], params) {
   if (!code) return list(root);
@@ -18,6 +18,14 @@ export default async function country(root, [code], params) {
   const current = data.years.find((y) => y.year === data.year);
   const leads = data.products.filter((p) => p.rank === 1);
   const sole = leads.filter((p) => p.supplierCount === 1).length;
+  const geo = data.geography;
+  const geography = [
+    geo && t("{distance} between the most populated cities of {reporter} and {name}.", { distance: km(geo.distanceKm), reporter: state.reporter.countryName, name }),
+    geo?.contiguous && t("They share a border."),
+    geo?.commonLanguage && t("They share an official language."),
+    data.country.landlocked && t("{name} is landlocked.", { name }),
+    state.snapshot.geography && !geo && t("GeoDist has no distance for {name}.", { name }),
+  ].filter(Boolean).join(" ");
 
   root.append(html(`
     <div class="head">
@@ -27,6 +35,7 @@ export default async function country(root, [code], params) {
         reporter: state.reporter.countryName,
         route: t(data.route.name), via: data.route.via.length ? data.route.via.map((v) => t(v)).join(" → ") : t("no chokepoint"),
       }))} <a href="#/routes?${query({ select: data.route.id, year: data.year })}">${t("Sea routes")}</a></p>` : ""}
+      ${geography ? `<p class="lede">${esc(geography)}</p>` : ""}
       <form class="controls">
         <label>${t("Year")} <select name="year">${recorded
           .map((y) => `<option ${y.year === data.year ? "selected" : ""}>${y.year}</option>`).reverse().join("")}</select></label>
