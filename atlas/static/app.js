@@ -62,7 +62,7 @@ async function render() {
   main.replaceChildren(section);
   if (!state.snapshot) {
     section.innerHTML = `<div class="empty"><h1>${t("No snapshot yet")}</h1><p>${t("Prepare a BACI release first:")}</p>
-      <pre>python -m atlas.prepare data/raw/BACI_HS12_V202601.zip data/raw/wdi-gdp.json</pre></div>`;
+      <pre>python -m atlas.prepare data/raw/BACI_HS12_V202601.zip</pre></div>`;
     return;
   }
   section.setAttribute("aria-busy", "true");

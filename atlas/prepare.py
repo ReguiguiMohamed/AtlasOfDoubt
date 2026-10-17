@@ -1,6 +1,10 @@
-"""Prepare one BACI release, and optionally WDI GDP, as a snapshot any country can be read from.
+"""Prepare one BACI release with WDI GDP as a snapshot any country can be read from.
 
-    python -m atlas.prepare data/raw/BACI_HS12_V202601.zip [data/raw/wdi-gdp.json]
+    python -m atlas.prepare data/raw/BACI_HS12_V202601.zip [wdi-gdp.json]
+
+The GDP file defaults to data/snapshots/wdi-gdp.json and is downloaded from
+the World Bank when it is missing, then kept, so later runs reuse the same
+file and the same snapshot id. Delete it to fetch newer GDP figures.
 
 Each annual CSV is checked in DuckDB. Valid flows are written once as Parquet
 partitioned by importer and year, so one country's imports never need a scan
@@ -20,6 +24,7 @@ import re
 import shutil
 import sys
 import tempfile
+import urllib.request
 import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -399,7 +404,14 @@ def prepare(path, db, gdp_path=None):
 if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         sys.exit(__doc__)
+    gdp_path = Path(sys.argv[2]) if len(sys.argv) == 3 else DATA / "wdi-gdp.json"
+    if not gdp_path.exists():
+        print(f"Downloading {GDP_INDICATOR} to {gdp_path}", flush=True)
+        with urllib.request.urlopen(GDP_URL, timeout=120) as response:
+            body = response.read()
+        gdp_path.parent.mkdir(parents=True, exist_ok=True)
+        gdp_path.write_bytes(body)
     client, database = connect()
     with client:
-        result = prepare(sys.argv[1], database, sys.argv[2] if len(sys.argv) == 3 else None)
+        result = prepare(sys.argv[1], database, gdp_path)
     print(f"{result['_id']} {result['status']}: {result['counts']}, {result['errors']['rejectedRows']} rows rejected")

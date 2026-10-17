@@ -26,11 +26,14 @@ process.
 ## Adding a release
 
 ```bash
-python -m atlas.prepare data/raw/BACI_HS12_V202701.zip data/raw/wdi-gdp.json
+python -m atlas.prepare data/raw/BACI_HS12_V202701.zip
 ```
 
-That is the whole step. The snapshot id is the archive name plus a hash of
-every input, for example `BACI_HS12_V202601@eadf14964b1c`. Work happens in a
+That is the whole step. GDP per capita comes from the World Bank file in
+`data/snapshots/wdi-gdp.json`, downloaded on the first run and reused after,
+or from a path given as a second argument. The snapshot id is the archive
+name plus a hash of every input, for example `BACI_HS12_V202601@eadf14964b1c`.
+Work happens in a
 `.partial` folder that is renamed only when every year is written, so an
 interrupted run leaves nothing a reader can pick. Running it again with the
 same files returns the existing snapshot. A new GDP file or a change to the

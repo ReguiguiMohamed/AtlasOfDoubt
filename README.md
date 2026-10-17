@@ -31,14 +31,10 @@ flowchart LR
 
 ## Run it
 
-Both paths need the BACI archive in `data/raw/`, and the GDP file if you want EXPY:
+Both paths need the BACI archive in `data/raw/`. Prepare fetches the World Bank GDP file on its first run and keeps it in `data/snapshots/wdi-gdp.json`:
 
 ```bash
 curl -L --create-dirs -o data/raw/BACI_HS12_V202601.zip https://www.cepii.fr/DATA_DOWNLOAD/baci/data/BACI_HS12_V202601.zip
-```
-
-```bash
-curl -o data/raw/wdi-gdp.json "https://api.worldbank.org/v2/country/all/indicator/NY.GDP.PCAP.PP.KD?format=json&date=2012:2024&per_page=20000"
 ```
 
 **With Docker**, nothing else to install:
@@ -48,7 +44,7 @@ docker compose up --build -d
 ```
 
 ```bash
-docker compose run --rm app python -m atlas.prepare data/raw/BACI_HS12_V202601.zip data/raw/wdi-gdp.json
+docker compose run --rm app python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
 ```
 
 Then open http://localhost:8000. The Parquet files stay in `data/snapshots/` and the rest in the `mongo` volume.
@@ -60,7 +56,7 @@ pip install -e ".[dev]"
 ```
 
 ```bash
-python -m atlas.prepare data/raw/BACI_HS12_V202601.zip data/raw/wdi-gdp.json
+python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
 ```
 
 ```bash

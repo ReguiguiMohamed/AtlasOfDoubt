@@ -1,5 +1,5 @@
 # Prepare a release once the stack is up:
-#   docker compose run --rm app python -m atlas.prepare data/raw/BACI_HS12_V202601.zip data/raw/wdi-gdp.json
+#   docker compose run --rm app python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
 services:
   mongo:
     image: mongo:9.0@sha256:f90507905ce6e52e4a63d0ff8964fc254fa4d37ccbe56c56f4bc0186eb02edea
