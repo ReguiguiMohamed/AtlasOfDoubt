@@ -77,9 +77,38 @@ export function chart(node, option) {
     ...option,
     // Unconfined, a tooltip near the chart edge spills past the page.
     tooltip: { confine: true, ...option.tooltip },
+    ...(option.xAxis && interactive(option)),
   });
+  if (option.xAxis) instance.getZr().on("dblclick", () => instance.dispatchAction({ type: "dataZoom", start: 0, end: 100 }));
   charts.add(instance);
   return instance;
+}
+
+const finePointer = matchMedia("(pointer: fine)").matches;
+
+// Category axes zoom to fewer bars or years. Value axes zoom only where dots crowd, since a zoomed bar loses its base.
+function interactive(option) {
+  const series = option.series ?? [];
+  const pick = (axes) => [axes].flat().flatMap((a, i) => (a.type === "category" || series.some((s) => s.type === "scatter") ? [i] : []));
+  const x = pick(option.xAxis);
+  const y = pick(option.yAxis);
+  // A plain wheel or a finger drag still scrolls the page. Ctrl and the wheel zoom, a mouse drag pans.
+  const inside = (key, index) => ({ type: "inside", [key]: index, filterMode: "none", zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false, moveOnMouseMove: finePointer });
+  return {
+    grid: { ...option.grid, top: Math.max(option.grid?.top ?? 60, 30) },
+    dataZoom: [...(x.length ? [inside("xAxisIndex", x)] : []), ...(y.length ? [inside("yAxisIndex", y)] : [])],
+    toolbox: {
+      right: 4, top: 0, itemSize: 14,
+      iconStyle: { borderColor: css("--muted") },
+      emphasis: { iconStyle: { borderColor: css("--accent") } },
+      feature: {
+        dataZoom: { xAxisIndex: x.length ? x : false, yAxisIndex: y.length ? y : false, filterMode: "none", title: { zoom: t("Zoom: drag a box, or Ctrl and the wheel"), back: t("Undo zoom") } },
+        saveAsImage: { title: t("Save as image"), backgroundColor: css("--surface"), pixelRatio: 2 },
+      },
+    },
+    // Hovering one series fades the others.
+    series: series.map((s) => (series.length > 1 && s.type !== "lines" ? { emphasis: { focus: "series" }, ...s } : s)),
+  };
 }
 
 export function disposeCharts() {

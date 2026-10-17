@@ -79,6 +79,12 @@ link opens on the same one. Without it the app asks for a country first.
 
 Both maps zoom with the wheel, a pinch or the + and − buttons, and pan by dragging. Whole world resets them.
 
+Every other chart zooms with Ctrl and the wheel or a box drawn after its zoom
+button, pans with a mouse drag and resets on a double-click. A plain wheel or
+a finger still scrolls the page. Bar charts zoom along their categories only.
+Scatter charts zoom both axes, which spreads a crowd of dots apart. The same
+toolbar saves the chart as a PNG.
+
 Each view renders into a fresh section, so a slow request from a view the
 reader already left writes into a detached node instead of the current page.
 
