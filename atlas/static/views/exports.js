@@ -1,5 +1,5 @@
 import { lang, t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, index, indexColumn, geoColumns, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, indexColumn, km, kpi, pct, pctColumn, query, reach, scoped, state, table, usd, usdColumn } from "../lib.js";
 
 const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 const BARS = 15;
@@ -13,6 +13,7 @@ export default async function exports(root, _, params) {
   const current = data.years.find((y) => y.year === data.year);
   const shown = data.destinations.slice(0, BARS);
   const years = data.years.map((y) => String(y.year));
+  const far = state.snapshot.geography && reach(data.destinations);
 
   root.append(html(`
     <div class="head">
@@ -32,6 +33,7 @@ export default async function exports(root, _, params) {
       ${kpi(t("Product HHI"), index(current?.productHhi))}
       ${kpi(t("Destination HHI"), index(current?.geoHhi))}
       ${kpi(t("EXPY"), expyValue(current?.expy) == null ? t("n/a") : dollars.format(expyValue(current.expy)), t("GDP per capita, PPP"))}
+      ${far ? kpi(t("Average distance"), km(far.km), t("{share} to neighbours", { share: pct(far.neighbours) })) : ""}
     </div>
     <div class="panel"><h2>${t("Exports and concentration, {from} to {to}", { from: years[0], to: years.at(-1) })}</h2>
       <p>${t("The HHI runs from 0 to 1, where 1 means a single product or a single destination.")}</p>
@@ -43,6 +45,9 @@ export default async function exports(root, _, params) {
       <div class="panel"><h2>${t("Destinations, {year}", { year: data.year })}</h2><div class="chart tall" id="bars"></div></div>
       <div class="panel"><h2>${t("Destination table")}</h2><div id="destinations"></div></div>
     </div>
+    ${far ? `<div class="panel" style="margin-top:1.25rem"><h2>${t("Distance and value, {year}", { year: data.year })}</h2>
+      <p>${t("Each bubble is a destination, sized by its share, on log scales. Neighbours and partners sharing an official language stand out.")} <span id="doubling"></span></p>
+      <div class="chart tall" id="gravity"></div></div>` : ""}
     <div class="panel" style="margin-top:1.25rem"><h2>${data.products.length === 1 ? t("1 product") : t("{count} products", { count: count(data.products.length) })}</h2>
       <p>${t("RCA above 1 means {reporter} exports relatively more of the product than the world does. The unit value is only read as a price when no quality flag is raised.", { reporter })}</p>
       <div id="products"></div></div>
@@ -95,6 +100,8 @@ export default async function exports(root, _, params) {
       label: { show: true, position: "right", color: css("--muted"), formatter: (p) => pct(shown[p.dataIndex].share) },
     }],
   }).on("click", (p) => profile(shown[p.dataIndex].countryCode));
+
+  if (far) root.querySelector("#doubling").textContent = doubling(gravity(root.querySelector("#gravity"), data.destinations, profile));
 
   table(root.querySelector("#destinations"), {
     data: data.destinations,

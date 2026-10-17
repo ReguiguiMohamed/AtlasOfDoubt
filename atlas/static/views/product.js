@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, geoColumns, html, index, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, km, kpi, loadWorld, pct, pctColumn, query, reach, scoped, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
 
 const CASE_STUDIES = [
   ["10", "Cereals (chapter 10)"],
@@ -28,6 +28,8 @@ export default async function product(root, [code], params) {
   const wanted = Number(params.get("year"));
   const current = recorded.find((y) => y.year === wanted) ?? recorded.at(-1);
   const m = current.metrics;
+  const located = (y) => y.suppliers.map((s) => ({ ...s, ...data.geography[s.countryCode] }));
+  const far = state.snapshot.geography && reach(located(current));
 
   root.append(html(`
     <div class="head">
@@ -48,6 +50,7 @@ export default async function product(root, [code], params) {
       ${kpi(t("Top 3 share"), pct(m.top3Share))}
       ${kpi(t("HHI"), index(m.hhi), m.hhi >= 0.25 ? t("highly concentrated") : "")}
       ${current.world ? kpi(t("World exporter HHI"), index(current.world.hhi), t("{name} leads world exports", { name: current.world.topSupplier?.countryName })) : ""}
+      ${far ? kpi(t("Average distance"), km(far.km), t("{share} from neighbours", { share: pct(far.neighbours) })) : ""}
     </div>
     <div class="panel" id="where"><h2>${t("Where the supply comes from, {year}", { year: current.year })}</h2>
       <p>${t("Shaded by share of the imports of {reporter}, with {reporter} in red. Very small countries do not show at this scale and are listed in the table.", { reporter })}</p>
@@ -56,6 +59,14 @@ export default async function product(root, [code], params) {
       <div class="panel"><h2>${t("Suppliers in {year}", { year: current.year })}</h2><div class="chart tall" id="bars"></div></div>
       <div class="panel"><h2>${t("Supplier table")}</h2><div id="suppliers"></div></div>
     </div>
+    ${far ? `<div class="grid" style="margin-top:1.25rem">
+      <div class="panel"><h2>${t("Distance and value, {year}", { year: current.year })}</h2>
+        <p>${t("Each bubble is a supplier, sized by its share, on log scales. Neighbours and partners sharing an official language stand out.")} <span id="doubling"></span></p>
+        <div class="chart tall" id="gravity"></div></div>
+      <div class="panel"><h2>${t("How far the supply travels, {from} to {to}", { from: data.years[0].year, to: data.years.at(-1).year })}</h2>
+        <p>${t("The import-weighted distance between the most populated cities, and the share bought from countries across a land border.")}</p>
+        <div class="chart tall" id="travel"></div></div>
+    </div>` : ""}
     <div class="panel" style="margin-top:1.25rem"><h2>${t("Imports and concentration, {from} to {to}", { from: data.years[0].year, to: data.years.at(-1).year })}</h2>
       <div class="chart" id="trend"></div></div>
     <div class="panel"><h2>${t("Shares of the five largest suppliers over time")}</h2><div class="chart" id="shares"></div></div>
@@ -94,8 +105,27 @@ export default async function product(root, [code], params) {
   });
   bars.on("click", (p) => profile(shown[p.dataIndex].countryCode));
 
+  if (far) {
+    root.querySelector("#doubling").textContent = doubling(gravity(root.querySelector("#gravity"), located(current), profile));
+    const reached = data.years.map((y) => (y.metrics ? reach(located(y)) : null));
+    chart(root.querySelector("#travel"), {
+      grid: { left: 70, right: 60, top: 40, bottom: 30 },
+      legend: { textStyle: { color: css("--muted") } },
+      tooltip: { trigger: "axis" },
+      xAxis: { ...axis(), type: "category", data: data.years.map((y) => String(y.year)) },
+      yAxis: [
+        { ...axis(), type: "value", scale: true, axisLabel: { color: css("--muted"), formatter: km } },
+        { ...axis(), type: "value", min: 0, max: 1, splitLine: { show: false }, axisLabel: { color: css("--muted"), formatter: (v) => pct(v, 0) } },
+      ],
+      series: [
+        { name: t("Average distance"), type: "line", smooth: true, areaStyle: { opacity: 0.12 }, data: reached.map((r) => r?.km ?? null), itemStyle: { color: css("--accent") }, tooltip: { valueFormatter: km } },
+        { name: t("Share from neighbours"), type: "bar", yAxisIndex: 1, barMaxWidth: 18, data: reached.map((r) => r?.neighbours ?? null), itemStyle: { color: css("--warn"), opacity: 0.6 }, tooltip: { valueFormatter: pct } },
+      ],
+    });
+  }
+
   const suppliers = table(root.querySelector("#suppliers"), {
-    data: ranked.map((s) => ({ ...s, ...data.geography[s.countryCode] })),
+    data: located(current),
     paginationSize: 12,
     columns: [
       { title: t("Country"), field: "countryName", minWidth: 140 },

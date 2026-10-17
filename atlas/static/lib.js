@@ -153,6 +153,55 @@ export const geoColumns = () => (state.snapshot.geography ? [
   { title: t("Language"), field: "commonLanguage", width: 100, formatter: (c) => yesNo(c.getValue()) },
 ] : []);
 
+// Value-weighted mean distance over the partners GeoDist covers, and the share of all value that crosses a land border.
+export function reach(rows) {
+  const sum = (list) => list.reduce((a, r) => a + r.valueUsd, 0);
+  const known = rows.filter((r) => r.distanceKm != null);
+  const value = sum(known);
+  if (!value) return null;
+  return { km: known.reduce((a, r) => a + r.valueUsd * r.distanceKm, 0) / value, neighbours: sum(known.filter((r) => r.contiguous)) / sum(rows) };
+}
+
+const TIES = [["contiguous", "Shares a border", "--warn"], ["commonLanguage", "Shares an official language", "--accent"], [null, "Neither", "--muted"]];
+
+// Trade against distance on log scales, the gravity pattern, with a least-squares line once there are enough partners to fit.
+export function gravity(node, rows, pick) {
+  const known = rows.filter((r) => r.distanceKm > 0 && r.valueUsd > 0);
+  const xs = known.map((r) => Math.log(r.distanceKm));
+  const ys = known.map((r) => Math.log(r.valueUsd));
+  const mean = (v) => v.reduce((a, b) => a + b, 0) / v.length;
+  const [mx, my] = [mean(xs), mean(ys)];
+  const spread = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+  const slope = known.length >= 8 && spread ? xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / spread : null;
+  const ends = [Math.min(...known.map((r) => r.distanceKm)), Math.max(...known.map((r) => r.distanceKm))];
+  chart(node, {
+    grid: { left: 70, right: 30, top: 40, bottom: 40 },
+    legend: { textStyle: { color: css("--muted") } },
+    tooltip: { formatter: (p) => (p.data.row ? `${esc(p.data.row.countryName)}: ${usd(p.data.row.valueUsd)}, ${km(p.data.row.distanceKm)}` : "") },
+    xAxis: { ...axis(), type: "log", name: t("Distance"), nameLocation: "middle", nameGap: 26, axisLabel: { color: css("--muted"), formatter: km } },
+    yAxis: { ...axis(), type: "log", axisLabel: { color: css("--muted"), formatter: usd } },
+    series: [
+      ...TIES.map(([field, name, color], i) => ({
+        type: "scatter",
+        name: t(name),
+        itemStyle: { color: css(color), opacity: 0.8 },
+        symbolSize: (_, p) => Math.max(6, Math.sqrt(p.data.row.share) * 70),
+        data: known.filter((r) => TIES.findIndex(([f]) => !f || r[f]) === i).map((r) => ({ value: [r.distanceKm, r.valueUsd], row: r })),
+      })),
+      ...(slope == null ? [] : [{
+        type: "line", name: t("Trend"), symbol: "none", silent: true, lineStyle: { type: "dashed", color: css("--ink") }, itemStyle: { color: css("--ink") },
+        data: ends.map((d) => [d, Math.exp(my + slope * (Math.log(d) - mx))]),
+      }]),
+    ],
+  }).on("click", (p) => p.data?.row && pick(p.data.row.countryCode));
+  return slope;
+}
+
+// Along a log-log line, doubling the distance multiplies trade by 2 to the power of the slope.
+export const doubling = (slope) => (slope == null ? "" : t("Along the trend, each doubling of distance goes with {change} trade. It describes this year's partners and is not a cause.", {
+  change: t(slope < 0 ? "{share} less" : "{share} more", { share: pct(Math.abs(2 ** slope - 1), 0) }),
+}));
+
 // Tabulator's own header filter waits for keyup, so pasted or autofilled text never filtered.
 export function countryPicker(node, countries, pick) {
   node.append(html(`<div class="controls"><label>${t("Search")} <input type="search" placeholder="${t("Filter countries")}" autofocus></label></div><div></div>`));
