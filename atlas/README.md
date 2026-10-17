@@ -10,6 +10,7 @@ process.
 | [`metrics.py`](metrics.py) | preparation and every request | totals, shares, top-3 share, HHI, group merging, RCA, unit values and their quality flags, PRODY, EXPY and the disruption scenario |
 | [`db.py`](db.py) | both | connects with Decimal stored as Decimal128 and creates the indexes |
 | [`prepare.py`](prepare.py) | once per release | checks the 13 annual files in DuckDB, writes flows as Parquet by importer and year, stores world and country-year aggregates, writes the error report |
+| [`coverage.py`](coverage.py) | before adding tariffs or geography | matches the WITS/TRAINS schedule list and CEPII GeoDist to BACI's countries and writes `coverage.csv` with each country's tariff years, HS revision and geography |
 | [`materialize.py`](materialize.py) | first visit to a country | builds that country's import and export view from its Parquet partition into MongoDB, under a lease, and evicts the least recently used views |
 | [`routes.py`](routes.py) | every request | the modelled sea lane from each partner region to the reporter and the chokepoints on it |
 | [`api.py`](api.py) | server | read endpoints scoped by `snapshot` and `reporter`, scenario preview, immutable reports, CSV export, the static mount |
@@ -101,7 +102,7 @@ reporter.
 
 ## Tests
 
-`pytest -q` runs 69 tests against a local MongoDB on port 27017. CI starts a
+`pytest -q` runs 70 tests against a local MongoDB on port 27017. CI starts a
 MongoDB 9.0 service for them.
 
 | Guarantee | Tests |
@@ -119,4 +120,5 @@ MongoDB 9.0 service for them.
 | Country views survive eviction, failure and an expired lease | `test_api.py::test_an_evicted_view_is_rebuilt_with_the_same_figures`, `::test_a_failed_build_leaves_nothing_readable`, `::test_a_build_whose_lease_expired_is_taken_over` |
 | Shifts count only products over the minimum value in both years | `test_api.py::test_movers_need_the_minimum_value_in_both_years` |
 | Reports ignore browser numbers and survive a new snapshot | `test_api.py::test_report_ignores_numbers_sent_by_the_browser`, `::test_report_is_unchanged_after_another_snapshot_is_added` |
+| WITS and GeoDist codes, and the EU's shared schedule, reach the right BACI country, and a member's own schedule wins | `test_coverage.py::test_coverage_maps_source_codes_and_eu_schedules_to_baci` |
 | Route and chokepoint totals are sums of their countries, and routes follow the reporter | `test_api.py::test_routes_sum_countries_into_routes_and_chokepoints`, `::test_routes_follow_the_reporter`, `::test_the_route_depends_on_the_reporter` |
