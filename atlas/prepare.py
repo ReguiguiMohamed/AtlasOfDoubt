@@ -497,7 +497,8 @@ def prepare(path, db, gdp_path=None, geo_paths=None):
         "geography": geo_provenance,
         "countries": [
             {"countryCode": int(r["country_code"]), "countryName": r["country_name"], "isoCode": r["country_iso3"],
-             "iso2": iso2[r["country_code"]], "landlocked": landlocked.get(int(r["country_code"]))}
+             "iso2": iso2[r["country_code"]]}
+            | ({"landlocked": landlocked[int(r["country_code"])]} if int(r["country_code"]) in landlocked else {})
             for r in sorted(country_rows, key=lambda r: r["country_name"])
         ],
         "worldTotals": world_totals,

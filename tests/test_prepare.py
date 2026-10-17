@@ -239,7 +239,7 @@ def test_geography_changes_the_snapshot_id_and_is_stored_per_pair(db, make_archi
     assert db.geo_pairs.count_documents({"snapshotId": snapshot["_id"]}) == 4
     pair = db.geo_pairs.find_one({"snapshotId": snapshot["_id"], "countryCode": 788, "partnerCode": 251}, {"_id": 0, "distanceKm": 1})
     assert pair == {"distanceKm": 1501}
-    assert {c["isoCode"]: c["landlocked"] for c in snapshot["countries"]} == {
+    assert {c["isoCode"]: c.get("landlocked") for c in snapshot["countries"]} == {
         "AFG": True, "CHN": None, "FRA": False, "ITA": False, "TUN": False, "USA": None,
     }
     assert snapshot["geography"]["unmatched"] == [156, 842]
