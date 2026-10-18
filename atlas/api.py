@@ -128,7 +128,7 @@ def geography(db, snapshot_id, reporter):
 
 @app.get("/api/snapshots")
 def list_snapshots(db: Db):
-    return list(db.snapshots.find({"status": "ready"}, {"countries": 0, "files": 0, "errors.samples": 0}).sort("_id", -1))
+    return list(db.snapshots.find({"status": "ready"}, {"countries": 0, "files": 0, "errors.samples": 0}).sort("preparedAt", -1))
 
 
 @app.get("/api/snapshots/{snapshot_id}")
