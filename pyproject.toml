@@ -11,6 +11,7 @@ dependencies = [
     "pymilvus==3.0.2",
     "pymongo==4.19.0",
     "uvicorn==0.54.0",
+    "xlrd==2.0.2",
 ]
 
 [project.optional-dependencies]

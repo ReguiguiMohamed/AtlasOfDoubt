@@ -54,3 +54,16 @@ def test_older_schedules_take_the_one_code_hs2012_maps_to(tmp_path):
 
     assert rows == {"100110": line("4", "4", "4") | {"sourceCodes": 1}}
     assert to_hs2012("H4", {"310230": line("1", "1", "1")}, {}) == {"310230": line("1", "1", "1") | {"sourceCodes": 1}}
+
+
+def test_preferences_keep_their_preferential_line_count_and_skip_an_unknown_rate(tmp_path):
+    path = tmp_path / "XYZ-2021-A01.xml"
+    path.write_text(
+        "<message:StructureSpecificData xmlns:message='m'><message:DataSet>"
+        "<Series PRODUCTCODE='010121'><Obs OBS_VALUE='1.5' TARIFFTYPE='PREF' MIN_RATE='0' MAX_RATE='3' TOTALNOOFLINES='2' NBR_PREF_LINES='1' NBR_NA_LINES='0' NOMENCODE='H4'/></Series>"
+        "<Series PRODUCTCODE='010129'><Obs OBS_VALUE='NaN' TARIFFTYPE='PREF' TOTALNOOFLINES='2' NBR_PREF_LINES='1' NOMENCODE='H4'/></Series>"
+        "<Series PRODUCTCODE='010130'><Obs OBS_VALUE='4' TARIFFTYPE='MFN' NOMENCODE='H4'/></Series>"
+        "</message:DataSet></message:StructureSpecificData>",
+        encoding="utf-8",
+    )
+    assert read_schedule(path, "PREF") == ("H4", {"010121": line("1.5", "0", "3", 2) | {"prefLines": 1}})
