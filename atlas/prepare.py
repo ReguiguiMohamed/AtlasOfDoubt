@@ -254,8 +254,8 @@ def read_geography(geo_path, dist_path, country_rows):
     return pairs, landlocked, provenance
 
 
-def read_tariffs(rates_path, schedules_path, country_rows):
-    """The schedule each BACI country applies, its provenance, and its rates as docs to stream into MongoDB.
+def read_tariffs(country_rows, rates_path, schedules_path, preferences_path=None, partners_path=None):
+    """The schedule each BACI country applies, its provenance, and its rates and preferences as docs to stream into MongoDB.
 
     The rates file holds about 900,000 rows, so docs come from a generator. Rates
     stay Decimal, and a code several source codes met in has no rate, only its range.
@@ -267,18 +267,28 @@ def read_tariffs(rates_path, schedules_path, country_rows):
             for r in csv.DictReader(f) if int(r["countryCode"]) in known
         }
 
-    def docs(snapshot_id):
-        with open(rates_path, encoding="utf-8") as f:
+    def docs(snapshot_id, path=rates_path):
+        with open(path, encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 yield {
                     "snapshotId": snapshot_id, "productCode": r["productCode"], "schedule": r["schedule"],
                     "year": int(r["year"]), "nomenclature": r["nomenclature"],
+                    **({"partner": r["partner"], "prefLines": int(r["prefLines"])} if "partner" in r else {}),
                     **{k: Decimal(r[k]) if r[k] else None for k in ("rate", "minRate", "maxRate")},
                     **{k: int(r[k]) for k in ("sourceCodes", "nationalLines", "naLines")},
                 }
 
+    paths = [p for p in (rates_path, schedules_path, preferences_path, partners_path) if p]
+    partners = {}
+    if partners_path:
+        with open(partners_path, encoding="utf-8") as f:
+            partners = {
+                r["partner"]: {"name": r["name"], "group": r["group"] == "1", "members": [int(m) for m in r["members"].split(";") if m]}
+                for r in csv.DictReader(f)
+            }
+
     provenance = {
-        "name": "WITS/TRAINS MFN applied tariffs",
+        "name": "WITS/TRAINS MFN and preferential applied tariffs" if partners else "WITS/TRAINS MFN applied tariffs",
         "url": "https://wits.worldbank.org/",
         "attribution": TARIFF_ATTRIBUTION,
         "disclaimer": TARIFF_DISCLAIMER,
@@ -287,12 +297,13 @@ def read_tariffs(rates_path, schedules_path, country_rows):
         "files": [
             {"filename": p.name, "sha256": sha256(p), "bytes": p.stat().st_size,
              "retrievedAt": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc)}
-            for p in map(Path, (rates_path, schedules_path))
+            for p in map(Path, paths)
         ],
         "schedules": len({a["schedule"] for a in applied.values()}),
         "countries": len(applied),
-    }
-    return docs, applied, provenance
+    } | ({"partners": partners, "unresolvedPartners": sorted(p for p, v in partners.items() if not v["members"])} if partners else {})
+    preference_docs = (lambda snapshot_id: docs(snapshot_id, preferences_path)) if preferences_path else None
+    return docs, preference_docs, applied, provenance
 
 
 def read_categories(hs_path, sections_path, products):
@@ -530,7 +541,7 @@ def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths
     existing = db.snapshots.find_one({"_id": snapshot_id})
     if existing and existing["status"] == "ready":
         return existing
-    for collection in (db.products, db.world_product_years, db.country_years, db.geo_pairs, db.tariffs):
+    for collection in (db.products, db.world_product_years, db.country_years, db.geo_pairs, db.tariffs, db.preferences):
         collection.delete_many({"snapshotId": snapshot_id})
 
     snapshot = {
@@ -580,7 +591,9 @@ def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths
             products = {r["code"].zfill(6): r["description"] for r in product_rows}
             gdp, gdp_provenance = read_gdp(gdp_path, country_rows) if gdp_path else ({}, None)
             pairs, landlocked, geo_provenance = read_geography(*geo_paths, country_rows) if geo_paths else ({}, {}, None)
-            tariff_docs, applied, tariff_provenance = read_tariffs(*tariff_paths, country_rows) if tariff_paths else (None, {}, None)
+            tariff_docs, preference_docs, applied, tariff_provenance = (
+                read_tariffs(country_rows, *tariff_paths) if tariff_paths else (None, None, {}, None)
+            )
             categories, category_provenance = read_categories(*hs_paths, products) if hs_paths else ({}, None)
             # The fixed-2012 sensitivity uses only countries with income in every year, so coverage cannot move it.
             common = {c for c, by_year in gdp.items() if set(YEARS) <= by_year.keys()}
@@ -623,10 +636,10 @@ def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths
                     [{"snapshotId": snapshot_id, "countryCode": a, "partnerCode": b, **f} for (a, b), f in sorted(pairs.items())],
                     ordered=False,
                 )
-            if tariff_docs:
-                rows = tariff_docs(snapshot_id)
+            for collection, make in ((db.tariffs, tariff_docs), (db.preferences, preference_docs)):
+                rows = make(snapshot_id) if make else iter(())
                 while batch := list(itertools.islice(rows, 10_000)):
-                    db.tariffs.insert_many(batch, ordered=False)
+                    collection.insert_many(batch, ordered=False)
         storage = {"path": snapshot_id, **write_manifest(out)}
         shutil.rmtree(final, ignore_errors=True)
         os.replace(out, final)
@@ -682,6 +695,9 @@ if __name__ == "__main__":
     if not all(p.exists() for p in tariff_paths):
         print("No tariffs.csv yet, preparing without tariffs", flush=True)
         tariff_paths = None
+    # Preferences from the same run join only when both files are there, so the snapshot id stays put without them.
+    elif all((DATA / n).exists() for n in ("preferences.csv", "tariff-partners.csv")):
+        tariff_paths += (DATA / "preferences.csv", DATA / "tariff-partners.csv")
     hs_paths = (DATA / "hs" / "harmonized-system.csv", DATA / "hs" / "sections.csv")
     for hs_path in hs_paths:
         download(HS_URL + hs_path.name, hs_path)

@@ -373,12 +373,16 @@ def trade_twins(db: Db, snapshot_id: SnapshotId, reporter: Reporter, flow: Liter
 
 @app.get("/api/products/{code}/tariffs")
 def tariffs(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
-    """The MFN tariff every market with a TRAINS schedule applies to one HS6 product.
+    """The tariff every market with a TRAINS schedule charges the reporter on one HS6 product.
 
-    EU members share one schedule, so each gets the EU's rate. A rate is a
-    simple average of national lines, and a code several source codes met in
-    has only a range. Markets are ordered by their rate, or a range's maximum.
-    Each market carries what the reporter sold it in the snapshot's last year.
+    Each market's rate is the lower of its MFN rate and the best preference
+    covering the reporter, with the agreement in preference and the MFN rate in
+    mfn. Members of one customs union, like the EU, charge each other nothing.
+    A rate is a simple average of national lines, and a code several source
+    codes met in has only a range. Markets are ordered by their rate, or a
+    range's maximum. Each market carries what the reporter sold it in the
+    snapshot's last year. charged holds the suppliers the reporter's own
+    schedule gives a preference, with their rate.
     """
     snapshot, _, generation = scope(db, snapshot_id, reporter)
     if not snapshot.get("tariffs"):
@@ -388,22 +392,56 @@ def tariffs(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     products = group_products(db, snapshot_id, code)
     found = db.tariffs.find({"snapshotId": snapshot_id, "productCode": code}, {"_id": 0, "snapshotId": 0, "productCode": 0})
     rates = {t.pop("schedule"): t for t in found}
+    partners = snapshot["tariffs"].get("partners", {})
+    names = {c["countryCode"]: c for c in snapshot["countries"]}
+    covering = [p for p, v in partners.items() if reporter in v["members"]]
+    best = {}
+    for f in db.preferences.find({"snapshotId": snapshot_id, "productCode": code, "partner": {"$in": covering}}, {"_id": 0}):
+        if f["schedule"] not in best or rank(f) < rank(best[f["schedule"]]):
+            best[f["schedule"]] = f
+    reporter_schedule = (names.get(reporter, {}).get("tariffSchedule") or {}).get("schedule")
+
+    def charge(schedule, country):
+        mfn = rates[schedule]
+        if schedule == reporter_schedule and country != reporter:
+            return {"rate": 0.0, "minRate": 0.0, "maxRate": 0.0, "mfn": mfn, "preference": {"partner": schedule, "name": "customs union"}}
+        # ponytail: the lowest of HS6 averages stands in for the line-level minimum, which WITS does not send per line.
+        if (pref := best.get(schedule)) and rank(pref) < rank(mfn):
+            return {k: pref[k] for k in ("rate", "minRate", "maxRate", "nationalLines", "prefLines")} | {
+                "mfn": mfn, "preference": {"partner": pref["partner"], "name": partners[pref["partner"]]["name"]},
+            }
+        return mfn | {"mfn": mfn, "preference": None}
+
     year = max(snapshot["years"])
     view = db.country_product_years.find_one({"generationId": generation, "productCode": code, "year": year}, {"exports.destinations": 1})
     sold = {d["countryCode"]: d["valueUsd"] for d in (view or {}).get("exports", {}).get("destinations", [])}
     markets = sorted(
         (
-            {k: c[k] for k in ("countryCode", "countryName", "isoCode")} | {"schedule": s["schedule"]} | rates[s["schedule"]]
+            {k: c[k] for k in ("countryCode", "countryName", "isoCode")} | {"schedule": s["schedule"]} | charge(s["schedule"], c["countryCode"])
             | {"exportsUsd": sold.get(c["countryCode"])}
             for c in snapshot["countries"] if (s := c.get("tariffSchedule")) and s["schedule"] in rates
         ),
-        key=lambda m: (-(m["rate"] if m["rate"] is not None else m["maxRate"] or 0), m["countryName"]),
+        key=lambda m: (-rank(m), m["countryName"]),
     )
+    charged = {}
+    if reporter_schedule in rates:
+        for f in db.preferences.find({"snapshotId": snapshot_id, "productCode": code, "schedule": reporter_schedule}, {"_id": 0}):
+            for member in partners.get(f["partner"], {}).get("members", []):
+                if member != reporter and (member not in charged or rank(f) < rank(charged[member])):
+                    charged[member] = f
+        charged = {
+            str(m): {k: f[k] for k in ("rate", "minRate", "maxRate", "partner")} | {"name": partners[f["partner"]]["name"]}
+            for m, f in charged.items() if rank(f) < rank(rates[reporter_schedule])
+        }
     return {
         "snapshot": snapshot_id, "reporter": reporter, "code": code, "description": products[0]["description"],
         "source": snapshot["tariffs"], "markets": markets, "exportYear": year,
-        "own": next((m for m in markets if m["countryCode"] == reporter), None),
+        "own": next((m for m in markets if m["countryCode"] == reporter), None), "charged": charged,
     }
+
+
+def rank(rate):
+    return rate["rate"] if rate["rate"] is not None else rate["maxRate"] or 0
 
 
 @app.get("/api/countries/{country_code}")

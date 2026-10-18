@@ -487,6 +487,35 @@ def test_tariffs_give_every_market_its_schedules_rate_and_keep_ranges(db, make_a
     assert heading.status_code == 422 and missing.status_code == 404
 
 
+def test_a_market_charges_the_reporter_its_best_preference_and_a_customs_union_nothing(db, make_archive, tmp_path):
+    preferences, partners = tmp_path / "preferences.csv", tmp_path / "tariff-partners.csv"
+    preferences.write_text(
+        "partner,schedule,year,nomenclature,productCode,rate,minRate,maxRate,sourceCodes,nationalLines,naLines,prefLines\n"
+        "P01,EUN,2021,H5,100119,5,0,10,1,2,0,1\n"
+        "156,EUN,2021,H5,100119,8,8,8,1,2,0,2\n"
+        "156,USA,2021,H5,100119,0,0,0,1,3,0,3\n"
+        "Q02,CHN,2021,H5,100119,0,0,0,1,4,0,4\n"
+        "C99,CHN,2021,H5,100119,0,0,0,1,4,0,4\n",
+        encoding="utf-8",
+    )
+    partners.write_text("partner,name,group,members\nP01,Invented pact,1,156;4\n156,China,0,156\nQ02,Invented scheme,1,251;380;156\nC99,C99,1,\n", encoding="utf-8")
+    snapshot = prepare(make_archive(FLOWS), db, tariff_paths=(*fixture_tariffs(tmp_path), preferences, partners))
+    assert snapshot["tariffs"]["unresolvedPartners"] == ["C99"]
+    with TestClient(app) as client:
+        china = client.get("/api/products/100119/tariffs", params={"snapshot": snapshot["_id"], "reporter": CHINA}).json()
+        france = client.get("/api/products/100119/tariffs", params={"snapshot": snapshot["_id"], "reporter": 251}).json()
+    markets = {m["isoCode"]: m for m in china["markets"]}
+    assert (markets["FRA"]["rate"], markets["FRA"]["mfn"]["rate"], markets["FRA"]["preference"]) == (5.0, 12.8, {"partner": "P01", "name": "Invented pact"})
+    assert markets["USA"]["preference"] is None and markets["TUN"]["rate"] == 36.0
+    assert china["charged"] == {
+        "251": {"rate": 0.0, "minRate": 0.0, "maxRate": 0.0, "partner": "Q02", "name": "Invented scheme"},
+        "380": {"rate": 0.0, "minRate": 0.0, "maxRate": 0.0, "partner": "Q02", "name": "Invented scheme"},
+    }
+    markets = {m["isoCode"]: m for m in france["markets"]}
+    assert (markets["ITA"]["rate"], markets["ITA"]["preference"]["name"]) == (0.0, "customs union")
+    assert markets["FRA"]["rate"] == 12.8 and france["own"]["isoCode"] == "FRA"
+
+
 @pytest.fixture
 def named(db, make_archive, tmp_path):
     snapshot = prepare(make_archive(NETWORK), db, hs_paths=hs_files(tmp_path))
