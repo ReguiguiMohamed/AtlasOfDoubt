@@ -16,7 +16,7 @@ A concentrated supplier list is a choice when the world market is open and a con
 2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release, GDP, GeoDist or tariff file lands beside the old one without changing numbers a report already cites.
 3. **Materialize.** The first visit to a country builds its view from its own Parquet partition into MongoDB, as one generation that becomes readable only when complete. The least recently used countries are evicted past a 1 GB budget and rebuilt with the same figures.
 4. **Measure.** One module, `atlas/metrics.py`, computes totals, shares, HHI, RCA, PRODY, EXPY and the scenario. Preparation, the API and saved reports all call it.
-5. **Explore and stress test.** The web app shows imports, exports, products, partner countries, the tariff each market charges on a product, the supplier network of a heading, each country's trade twins and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
+5. **Explore and stress test.** The web app shows imports, exports, products, partner countries, the tariff each market charges the chosen country on a product, preferences included, the supplier network of a heading, each country's trade twins and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
 
 ```mermaid
 flowchart LR
@@ -61,7 +61,7 @@ Then open http://localhost:8000. The Parquet files stay in `data/snapshots/` and
 pip install -e ".[dev]"
 ```
 
-Tariffs are optional. These two fetch the WITS schedule list and the latest schedule of every BACI country, 170 files and 280 MB, into `data/snapshots/`, and prepare picks them up:
+Tariffs are optional. These two fetch the WITS schedule list, the latest schedule of every BACI country and the preferential rates of each partner it lists, about 1,500 files, into `data/snapshots/`, and prepare picks them up:
 
 ```bash
 python -m atlas.coverage data/raw/BACI_HS12_V202601.zip
