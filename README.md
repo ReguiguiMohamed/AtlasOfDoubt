@@ -14,7 +14,7 @@ A concentrated supplier list is a choice when the world market is open and a con
 
 1. **Prepare.** `python -m atlas.prepare` checks the 13 yearly files of a BACI release in DuckDB, writes the valid flows once as Parquet partitioned by importer and year, and stores world totals, country-year summaries, RCA inputs and PRODY in MongoDB. An optional World Bank GDP file adds PRODY and EXPY, and the CEPII GeoDist files add the distance, a shared border and a common official language for each country pair. Each country's latest WITS/TRAINS MFN tariff schedule, mapped to HS2012, goes into MongoDB beside them, with the HS section, chapter and heading name of every product. The last year's flows also go into a Ladybug graph, one edge per exporter, importer and HS4 heading, and into Milvus Lite as one sparse vector per country and flow over its HS6 basket.
 2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release, GDP, GeoDist or tariff file lands beside the old one without changing numbers a report already cites.
-3. **Materialize.** The first visit to a country builds its view from its own Parquet partition into MongoDB, as one generation that becomes readable only when complete. The least recently used countries are evicted past a 1 GB budget and rebuilt with the same figures. A restart rebuilds the 3 countries visited last.
+3. **Materialize.** The first visit to a country builds its view from its own Parquet partition into MongoDB, as one generation that becomes readable only when complete. Its first and last years come first, so the imports page opens before the other 11 years fill in behind it. The least recently used countries are evicted past a 1 GB budget and rebuilt with the same figures. A restart rebuilds the 3 countries visited last.
 4. **Measure.** One module, `atlas/metrics.py`, computes totals, shares, HHI, RCA, PRODY, EXPY and the scenario. Preparation, the API and saved reports all call it.
 5. **Explore and stress test.** The web app shows imports, exports, products, partner countries, the tariff each market charges the chosen country on a product, preferences included, the supplier network of a heading, each country's trade twins and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
 
@@ -85,10 +85,11 @@ A new release takes the same one command with its own archive. `pytest -q` runs 
 
 | Check | Result |
 | --- | --- |
-| Tests | 92 passed locally against MongoDB 9.0, and 7 Node frontend tests |
+| Tests | 96 passed locally against MongoDB 9.0, and 7 Node frontend tests |
 | Tariffs, latest WITS schedules | 883,010 HS2012 rows from 170 schedules, covering 196 of BACI's countries |
 | Full release in the stores | 142,112,452 flows for 238 countries, 2012 to 2024: 1,049 MB of Parquet, 408 MB of MongoDB data with 96 MB of indexes, an 89 MB Ladybug graph of 4,555,246 edges, 11 MB of Milvus vectors |
 | First visit to a country, 18 October 2026 | 40 s for Fiji, 56 s for Brazil, 97 s for the USA, down from 70 s, 109 s and 166 s |
+| Imports page on a first visit, then every year | Japan 11 s then 44 s more, Germany 36 s then 68 s more |
 | Warm requests, median and 95th percentile | product history 40/152 ms, tariffs 45/57 ms, Milvus twins 256/341 ms, overview 413/790 ms, exports 796/917 ms, Ladybug network 1.1/1.2 s, country profile 1.0/2.2 s, routes 1.4/3.1 s |
 | Tunisia, 2024, products over $1M | 1,823, of which 1,090 with HHI at or above 0.25 |
 | Tunisia, concentrated by choice, 2024 | 877 products, $12.42B of $25.03B |

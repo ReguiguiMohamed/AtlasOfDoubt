@@ -80,7 +80,10 @@ decimal text.
 
 A country's documents are built on its first visit and tagged with one
 generation id. Readers see a generation only after its job is marked ready,
-so a build that fails halfway shows nothing. A second request during a build
+so a build that fails halfway shows nothing. A page that reads only the
+first and last years, like the imports page, opens once those two are built,
+and a background thread adds the other years to the same generation. A
+restart hands an unfinished fill to its next reader. A second request during a build
 waits for it, and a build whose 10 minute lease ran out is taken over. Past
 1 GB the least recently used generations are dropped and rebuilt on the next
 visit.
@@ -127,7 +130,7 @@ reporter.
 
 ## Tests
 
-`pytest -q` runs 94 tests against a local MongoDB on port 27017. CI starts a
+`pytest -q` runs 96 tests against a local MongoDB on port 27017. CI starts a
 MongoDB 9.0 service for them.
 
 `node --test tests/frontend.test.mjs` checks chart tooltip confinement, toolbar
@@ -151,6 +154,7 @@ spacing, zoom axes, reset and narrow-screen label settings without MongoDB.
 | RCA, unit values, PRODY and EXPY | `test_prepare.py::test_exports_carry_rca_unit_value_and_coverage`, `::test_prody_and_expy_use_same_year_income` |
 | One reporter never sees another's flows | `test_api.py::test_each_reporter_sees_only_its_own_flows_whatever_the_visit_order` |
 | Country views survive eviction, failure and an expired lease | `test_api.py::test_an_evicted_view_is_rebuilt_with_the_same_figures`, `::test_a_failed_build_leaves_nothing_readable`, `::test_a_build_whose_lease_expired_is_taken_over` |
+| A first visit opens on the first and last years, and an unfinished fill is taken over | `test_api.py::test_a_first_visit_opens_on_the_first_and_last_years_and_fills_in_the_rest`, `::test_a_fill_that_stopped_is_taken_over_once_its_lease_expires` |
 | A restart rebuilds the 3 countries visited last, the latest kept newest | `test_api.py::test_a_restart_rebuilds_the_countries_visited_last_the_latest_last` |
 | Shifts count only products over the minimum value in both years | `test_api.py::test_movers_need_the_minimum_value_in_both_years` |
 | Reports ignore browser numbers and survive a new snapshot | `test_api.py::test_report_ignores_numbers_sent_by_the_browser`, `::test_report_is_unchanged_after_another_snapshot_is_added` |
