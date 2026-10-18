@@ -11,6 +11,7 @@ passes its byte budget.
 
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import duckdb
@@ -24,6 +25,9 @@ CACHE_BYTES = 1_000_000_000
 LEASE = timedelta(minutes=10)
 POLL = 0.5
 WORLD_ALTERNATIVES = 5
+INSERT_BATCH = 2000
+INSERT_THREADS = 4
+WORLD_FIELDS = ("productCode", "year", "totalUsd", "sumSquares", "exporterCount", "unitValueUsdPerTonne", "prody")
 
 
 def ensure(db, snapshot, country, budget=CACHE_BYTES):
@@ -135,11 +139,17 @@ def build(db, snapshot, country, generation):
     codes = sorted({product for product, _ in keys})
     descriptions = {
         p["productCode"]: p["description"]
-        for p in db.products.find({"snapshotId": snapshot["_id"], "productCode": {"$in": codes}})
+        for p in db.products.find(
+            {"snapshotId": snapshot["_id"], "productCode": {"$in": codes}}, {"_id": 0, "productCode": 1, "description": 1}
+        )
     }
     worlds = {
         (w["productCode"], w["year"]): w
-        for w in db.world_product_years.find({"snapshotId": snapshot["_id"], "productCode": {"$in": codes}})
+        for w in db.world_product_years.find(
+            {"snapshotId": snapshot["_id"], "productCode": {"$in": codes}},
+            # The country itself may be one of the top exporters, so one more than the alternatives kept.
+            {**{f: 1 for f in WORLD_FIELDS}, "topExporters": {"$slice": WORLD_ALTERNATIVES + 1}},
+        )
     }
     basket_totals = {
         y["year"]: y["exportsUsd"] for y in db.country_years.find({"snapshotId": snapshot["_id"], "countryCode": country})
@@ -175,8 +185,12 @@ def build(db, snapshot, country, generation):
             if year == last:
                 doc["exports"]["destinations"] = destinations.get(product, [])
         docs.append(doc)
-    if docs:
-        db.country_product_years.insert_many(docs, ordered=False)
+    # Parallel batches keep mongod indexing one batch while the next is encoded.
+    with ThreadPoolExecutor(INSERT_THREADS) as pool:
+        list(pool.map(
+            lambda i: db.country_product_years.insert_many(docs[i:i + INSERT_BATCH], ordered=False),
+            range(0, len(docs), INSERT_BATCH),
+        ))
 
 
 def world_without(world, country, value, names):
