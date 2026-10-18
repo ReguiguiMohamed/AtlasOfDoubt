@@ -37,6 +37,18 @@ or from a path given as a second argument. The snapshot id is the archive
 name plus a hash of every input, for example `BACI_HS12_V202601@eadf14964b1c`.
 Work happens in a
 `.partial` folder that is renamed only when every year is written, so an
+Tariffs join when `tariffs.csv` and `tariff-schedules.csv` are in
+`data/snapshots/`, written by `python -m atlas.coverage` and then
+`python -m atlas.tariffs`. A schedule in HS2012 keeps its rates. One in
+HS2007 or HS2002 gives each HS2012 code the one older code WITS maps it to.
+Where several HS2017 codes meet in one HS2012 code, the row keeps their
+lowest and highest rate and how many codes met, and never averages them.
+EU members share the EUN schedule, stored once.
+The last year's flows also go into `graph.lbug` in the snapshot folder, a
+Ladybug graph the product page opens read-only, and into `twins.db`, a Milvus
+Lite folder with one collection per flow.
+Each panel names the store it reads. If either file is missing, the API answers
+503 for that panel alone and the page says the store is unavailable.
 interrupted run leaves nothing a reader can pick. Running it again with the
 same files returns the existing snapshot. A new GDP file or a change to the
 formulas gives a new id beside the old one. Every request names its
@@ -75,7 +87,7 @@ link opens on the same one. Without it the app asks for a country first.
 | `#/exports?year&minValue` | exports and imports from 2012 to 2024, product and destination HHI, EXPY when GDP was prepared, destinations with their distance, border and language, a bubble chart of each destination's value against its distance with the fitted trend, and each product with its world share, RCA, unit value and quality flags |
 | `#/country` and `#/country/{code}?year` | every partner country with a search box, then one partner: its distance in km between the most populated cities, a shared border or official language, whether it is landlocked, its modelled sea route, what it supplied and bought back each year, the products it supplies and its rank among their suppliers |
 | `#/routes?year&code&select` | supplier value summed per sea route and per chokepoint on a map, for all products or one code, with a detail panel for the selected route or strait: trend, countries, the products most exposed and a link to simulate its closure |
-| `#/product/{code}?year` | one product, heading or chapter: supplier bars and a table with each supplier's distance, border and language, a bubble chart of supplier value against distance, the import-weighted distance and the share from neighbours by year, imports, exports, RCA and HHI from 2012 to 2024, supplier shares over time, for one product the largest world exporters against what each sent the reporter, and a link to its sea routes |
+| `#/product/{code}?year` | one product, heading or chapter under its section and chapter names: a world map of its suppliers with animated flows sized by share, a year slider that plays 2012 to 2024 and, on a click, what that supplier sells the reporter inside the code, supplier bars and a table with each supplier's distance, border and language, a bubble chart of supplier value against distance, the import-weighted distance and the share from neighbours by year, imports, exports, RCA and HHI from 2012 to 2024, supplier shares over time, for one product the 25 largest world exporters against what each sent the reporter, with their distance, border and language and filters for each, for one product the MFN tariff of every market on a map and a sorted wall where a range floats from its lowest to its highest rate, a hatched bar marks non-ad-valorem duties and a dot sized by value marks each market the reporter already sells to, for a heading or product the supplier network from the trade graph, and a link to its sea routes |
 | `#/scenario?mode&code&year&suppliers&reduction` | product or supplier-country disruption, previewed live, saved as a report |
 | `#/reports` and `#/reports/{id}` | the reporter's saved reports with provenance, limitations, CSV download and a print layout that keeps every table row |
 

@@ -23,6 +23,12 @@ flowchart LR
     Zip[(BACI zip<br>1.27 GB)] -->|atlas.prepare| Parquet[(Parquet<br>by importer, year)]
     Zip -->|atlas.prepare| World[(MongoDB<br>world and country-year)]
     Parquet -->|first visit| Cache[(MongoDB<br>one country's view)]
+    WITS[(WITS/TRAINS<br>latest schedules)] -->|atlas.tariffs| Tariffs[(MongoDB<br>tariffs by schedule)]
+    Tariffs --> API
+    Zip -->|atlas.prepare| Graph[(Ladybug<br>trade graph, last year)]
+    Graph --> API
+    Zip -->|atlas.prepare| Twins[(Milvus Lite<br>basket vectors, last year)]
+    Twins --> API
     World --> Cache
     Cache --> API[FastAPI<br>atlas.api]
     API --> Web[Web app<br>EN / FR]
@@ -55,12 +61,6 @@ Then open http://localhost:8000. The Parquet files stay in `data/snapshots/` and
 pip install -e ".[dev]"
 ```
 
-```bash
-python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
-```
-
-```bash
-uvicorn atlas.api:app
 Tariffs are optional. These two fetch the WITS schedule list and the latest schedule of every BACI country, 170 files and 280 MB, into `data/snapshots/`, and prepare picks them up:
 
 ```bash
@@ -71,6 +71,12 @@ python -m atlas.coverage data/raw/BACI_HS12_V202601.zip
 python -m atlas.tariffs
 ```
 
+```bash
+python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
+```
+
+```bash
+uvicorn atlas.api:app
 ```
 
 A new release takes the same one command with its own archive. `pytest -q` runs the tests against the same local MongoDB in a database of its own, `atlas_test`.
@@ -97,7 +103,7 @@ The Tunisia figures come from the earlier Tunisia-only import, measured on the s
 
 ## Built with
 
-Python 3.12, FastAPI 0.143.3, PyMongo 4.19.0, DuckDB 1.5.6, MongoDB 9.0, ECharts 5.6.0, Tabulator 6.3.1, topojson-client 3.1.0 and world-atlas 2.0.2.
+Python 3.12, FastAPI 0.143.3, PyMongo 4.19.0, DuckDB 1.5.6, MongoDB 9.0, Ladybug 0.21.2, Milvus Lite 3.2.2 with PyMilvus 3.0.2, ECharts 5.6.0, Tabulator 6.3.1, topojson-client 3.1.0 and world-atlas 2.0.2.
 
 ## Data
 

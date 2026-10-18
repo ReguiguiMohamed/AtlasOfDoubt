@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctColumn, query, scoped, state, storeTag, table, twins, usd, usdColumn } from "../lib.js";
 
 // 0.25 is where the 2010 US Horizontal Merger Guidelines start calling a market highly concentrated (HHI 2500 of 10000).
 const HIGH = 0.25;
@@ -50,7 +50,7 @@ export default async function overview(root, _, params) {
         .map((y) => `<option ${y === from ? "selected" : ""}>${y}</option>`).join("")}</select></label></form>
       <div class="chart tall" id="movers"></div>
     </div>` : ""}
-    <div class="panel"><h2>${rows.length === 1 ? t("1 product") : t("{count} products", { count: count(rows.length) })}</h2><div id="products"></div></div>
+    <div class="panel"><h2>${rows.length === 1 ? t("1 product") : t("{count} products", { count: count(rows.length) })} ${storeTag("MongoDB documents")}</h2><div id="products"></div></div>
   `));
 
   const form = root.querySelector("form");
@@ -150,3 +150,4 @@ function movers(root, moved, params) {
   });
   plot.on("click", (p) => p.data?.row && (location.hash = `#/product/${p.data.row.productCode}?year=${moved.to}`));
 }
+  await twins(root, "imports");

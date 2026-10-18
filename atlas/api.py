@@ -24,8 +24,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pymongo.database import Database
 
-from atlas import materialize, metrics, routes
+from atlas import graph, materialize, metrics, routes, twins
 from atlas.db import connect
+from atlas.prepare import DATA
 
 CODE_PATTERN = r"^\d{2}(\d{2}){0,2}$"
 
@@ -109,6 +110,14 @@ def combined_suppliers(code, docs):
 
 def names_of(snapshot):
     return {c["countryCode"]: c for c in snapshot["countries"]}
+
+
+def companion(snapshot, part, store):
+    """The path of the snapshot's graph or twins, or a 503 when its files are gone, so only that panel fails."""
+    path = DATA / snapshot["storage"]["path"] / snapshot[part]["path"]
+    if not path.exists():
+        raise HTTPException(503, f"the {store} of {snapshot['_id']} is unavailable")
+    return path
 
 
 def geography(db, snapshot_id, reporter):
@@ -269,6 +278,9 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
 
     Rank is one plus the number of suppliers that sent more, so equal values share a rank.
     """
+    A product's year also lists the world's largest exporters of it other than
+    the reporter, each with its share of world exports.
+
     snapshot, home, generation = scope(db, snapshot_id, reporter)
     year = checked_year(snapshot, year)
     country = find_country(snapshot, country_code)
@@ -278,9 +290,6 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
     }
     own = {"$first": {"$filter": {"input": "$imports.suppliers", "cond": {"$eq": ["$$this.countryCode", country_code]}}}}
     supplied = db.country_product_years.aggregate([
-    A product's year also lists the world's largest exporters of it other than
-    the reporter, each with its share of world exports.
-
         {"$match": {"generationId": generation, "imports.suppliers.countryCode": country_code}},
         {"$project": {"year": 1, "own": own}},
         {"$group": {"_id": "$year", "valueUsd": {"$sum": "$own.valueUsd"}, "productCount": {"$sum": 1}}},
@@ -314,6 +323,7 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
             "hhi": "$metrics.hhi",
         }},
         {"$sort": {"valueUsd": -1}},
+            "exporters": exporters.get(year, []),
     ])
     products = [{**r, "share": r["valueUsd"] / r["totalUsd"]} for r in rows]
     route = routes.route(home["isoCode"], country["isoCode"])
@@ -321,9 +331,83 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
         "snapshot": snapshot_id, "reporter": home, "year": year, "country": country, "years": years, "products": products,
         "geography": geography(db, snapshot_id, reporter).get(country_code),
         "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]}
+@app.get("/api/products/{code}/network")
+def network(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
+    """The reporter's supplier network for the heading of a 4 or 6 digit code, from the snapshot's Ladybug graph."""
+    snapshot = ready_snapshot(db, snapshot_id)
+    find_country(snapshot, reporter, status=422)
+    if not snapshot.get("graph"):
+        raise HTTPException(404, f"{snapshot_id} has no graph")
+    if len(code) < 4:
+        raise HTTPException(422, "the graph holds headings, so the code needs 4 or 6 digits")
+    group_products(db, snapshot_id, code)
+    found = graph.network(companion(snapshot, "graph", "Ladybug graph"), reporter, code[:4])
+    names = names_of(snapshot)
+    codes = {reporter, *(r[k] for rows in found.values() for r in rows for k in ("countryCode", "origin", "via") if k in r)}
+    return {
+        "snapshot": snapshot_id, "reporter": reporter, "heading": code[:4], "year": snapshot["graph"]["year"], **found,
+        "names": {c: names[c]["countryName"] for c in codes},
+    }
+
+
+@app.get("/api/twins")
+def trade_twins(db: Db, snapshot_id: SnapshotId, reporter: Reporter, flow: Literal["imports", "exports"] = "exports"):
+    """Countries whose basket of the flow looks most like the reporter's in the snapshot's last year, from Milvus."""
+    snapshot = ready_snapshot(db, snapshot_id)
+    home = find_country(snapshot, reporter, status=422)
+    if not snapshot.get("twins"):
+        raise HTTPException(404, f"{snapshot_id} has no twins")
+    found = twins.twins(companion(snapshot, "twins", "Milvus twins"), flow, reporter)
+    if found is None:
+        raise HTTPException(404, f"{home['countryName']} has no {flow} in {snapshot['twins']['year']}")
+    names = names_of(snapshot)
+    codes = {p["productCode"] for s in found["closest"] for p in s["shared"]}
+    descriptions = {p["productCode"]: p["description"] for p in db.products.find({"snapshotId": snapshot_id, "productCode": {"$in": list(codes)}})}
+    country = lambda s: {k: names[s["countryCode"]][k] for k in ("countryName", "isoCode")} | s
+    return {
+        "snapshot": snapshot_id, "reporter": reporter, "flow": flow, "year": snapshot["twins"]["year"], "metric": snapshot["twins"]["metric"],
+        "similar": [country(s) for s in found["similar"]],
+        "closest": [country(s) | {"shared": [p | {"description": descriptions.get(p["productCode"])} for p in s["shared"]]} for s in found["closest"]],
+    }
+
+
+@app.get("/api/products/{code}/tariffs")
+def tariffs(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
+    """The MFN tariff every market with a TRAINS schedule applies to one HS6 product.
+
+    EU members share one schedule, so each gets the EU's rate. A rate is a
+    simple average of national lines, and a code several source codes met in
+    has only a range. Markets are ordered by their rate, or a range's maximum.
+    Each market carries what the reporter sold it in the snapshot's last year.
+    """
+    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    if not snapshot.get("tariffs"):
+        raise HTTPException(404, f"{snapshot_id} has no tariffs")
+    if len(code) != 6:
+        raise HTTPException(422, "tariffs are per HS6 product, so the code needs 6 digits")
+    products = group_products(db, snapshot_id, code)
+    found = db.tariffs.find({"snapshotId": snapshot_id, "productCode": code}, {"_id": 0, "snapshotId": 0, "productCode": 0})
+    rates = {t.pop("schedule"): t for t in found}
+    year = max(snapshot["years"])
+    view = db.country_product_years.find_one({"generationId": generation, "productCode": code, "year": year}, {"exports.destinations": 1})
+    sold = {d["countryCode"]: d["valueUsd"] for d in (view or {}).get("exports", {}).get("destinations", [])}
+    markets = sorted(
+        (
+            {k: c[k] for k in ("countryCode", "countryName", "isoCode")} | {"schedule": s["schedule"]} | rates[s["schedule"]]
+            | {"exportsUsd": sold.get(c["countryCode"])}
+            for c in snapshot["countries"] if (s := c.get("tariffSchedule")) and s["schedule"] in rates
+        ),
+        key=lambda m: (-(m["rate"] if m["rate"] is not None else m["maxRate"] or 0), m["countryName"]),
+    )
+    return {
+        "snapshot": snapshot_id, "reporter": reporter, "code": code, "description": products[0]["description"],
+        "source": snapshot["tariffs"], "markets": markets, "exportYear": year,
+        "own": next((m for m in markets if m["countryCode"] == reporter), None),
+    }
+
+
         if route else None,
     }
-            "exporters": exporters.get(year, []),
 
 
 @app.get("/api/routes")

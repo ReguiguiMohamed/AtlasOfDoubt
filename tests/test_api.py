@@ -1,5 +1,8 @@
+import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,15 +93,15 @@ def preview(api, **spec):
     body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, **spec}
     response = api.post("/api/scenarios/preview", json=body)
     assert response.status_code == 200, response.text
-    return response.json()["result"]
-
-
 def test_history_lists_world_exporters_without_the_reporter(api):
     one = {y["year"]: y for y in api.get("/api/products/010121/history").json()["years"]}
     group = {y["year"]: y for y in api.get("/api/products/01/history").json()["years"]}
     assert [(e["isoCode"], e["valueUsd"]) for e in one[2012]["exporters"]] == [("FRA", 160000), ("ITA", 30000), ("USA", 10000)]
     assert one[2012]["exporters"][0]["share"] == pytest.approx(160 / 205)
     assert group[2012]["exporters"] == []
+
+
+    return response.json()["result"]
 
 
 def test_product_scenario_follows_the_blueprint_rule(api):
@@ -189,10 +192,71 @@ def test_country_profile_sums_supplies_across_products(api):
     profile = api.get("/api/countries/251", params={"year": 2012}).json()
     assert profile["country"]["countryName"] == "France"
     assert [(p["productCode"], p["valueUsd"], p["share"], p["rank"]) for p in profile["products"]] == [
+# Tunisia and France export the same mix. China shares the fertilizer and Italy the wheat, and the USA shares nothing.
+TWINS = {2024: [
+    "2024,788,4,100119,64,1", "2024,788,4,310230,36,1",
+    "2024,251,4,100119,64,1", "2024,251,4,310230,36,1",
+    "2024,380,4,100119,36,1", "2024,380,4,010121,64,1",
+    "2024,156,4,310230,100,1",
+    "2024,842,4,010121,100,1",
+]}
+
+
+def test_twins_rank_countries_by_basket_overlap_and_name_what_they_share(db, make_archive):
+    snapshot = prepare(make_archive(TWINS), db)
+    assert snapshot["twins"]["vectors"] == {"imports": 1, "exports": 5}
+    params = {"snapshot": snapshot["_id"], "reporter": TUNISIA}
+    with TestClient(app) as client:
+        found = client.get("/api/twins", params=params).json()
+        assert client.get("/api/twins", params=params | {"flow": "imports"}).status_code == 404
+    assert (found["flow"], found["year"]) == ("exports", 2024)
+    assert [(s["isoCode"], round(s["similarity"], 4)) for s in found["similar"]] == [("FRA", 1.0), ("CHN", 0.6), ("ITA", 0.48)]
+    france = found["closest"][0]["shared"]
+    assert [(p["productCode"], round(p["contribution"], 4)) for p in france] == [("100119", 0.64), ("310230", 0.36)]
+    assert france[0]["description"] == "Wheat: durum wheat, other than seed"
+
+
         ("010121", 60000, 0.6, 1),
         ("310230", 2734, 1, 1),
     ]
     years = {y["year"]: y for y in profile["years"]}
+def test_network_finds_shared_suppliers_other_exporters_and_two_step_paths(db, make_archive):
+    snapshot = prepare(make_archive(NETWORK), db)["_id"]
+    params = {"snapshot": snapshot, "reporter": TUNISIA}
+    with TestClient(app) as client:
+        found = client.get("/api/products/100119/network", params=params).json()
+        assert client.get("/api/products/10/network", params=params).status_code == 422
+    assert (found["heading"], found["year"]) == ("1001", 2024)
+    assert found["suppliers"] == [{"countryCode": 251, "valueUsd": 54000}, {"countryCode": USA, "valueUsd": 20000}]
+    assert found["peers"] == [{"countryCode": 380, "sharedSuppliers": 2, "valueUsd": 35000}]
+    assert found["alternatives"] == [
+        {"countryCode": CHINA, "markets": 1, "valueUsd": 40000}, {"countryCode": 4, "markets": 1, "valueUsd": 3000},
+    ]
+    assert found["paths"] == [{"origin": 4, "via": 251, "valueUsd": 3000}]
+    assert found["links"] == [
+        {"from": CHINA, "to": 380, "valueUsd": 40000}, {"from": 251, "to": 380, "valueUsd": 30000},
+        {"from": USA, "to": 380, "valueUsd": 5000},
+    ]
+    assert found["names"]["4"] == "Afghanistan"
+
+
+def test_a_missing_graph_or_twins_fails_only_its_own_panel(db, make_archive):
+    snapshot = prepare(make_archive(NETWORK), db)
+    folder = Path(os.environ["ATLAS_DATA"]) / snapshot["storage"]["path"]
+    for part in ("graph", "twins"):
+        gone = folder / snapshot[part]["path"]
+        shutil.rmtree(gone) if gone.is_dir() else gone.unlink()
+    params = {"snapshot": snapshot["_id"], "reporter": TUNISIA}
+    with TestClient(app) as client:
+        network = client.get("/api/products/100119/network", params=params)
+        trade_twins = client.get("/api/twins", params=params)
+        kept = [client.get(f"/api/{path}", params=params).status_code for path in ("overview", "exports", "products/100119/history")]
+    assert (network.status_code, trade_twins.status_code) == (503, 503)
+    assert network.json()["detail"] == f"the Ladybug graph of {snapshot['_id']} is unavailable"
+    assert kept == [200, 200, 200]
+    assert not (folder / snapshot["twins"]["path"]).exists()
+
+
     assert years[2012]["valueUsd"] == 62734
     assert years[2012]["shareOfImports"] == pytest.approx(62734 / 102734)
     assert years[2012]["productCount"] == 2

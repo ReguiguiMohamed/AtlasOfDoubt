@@ -36,7 +36,7 @@ from pathlib import Path
 
 import duckdb
 
-from atlas import metrics
+from atlas import graph, metrics, twins
 from atlas.db import connect
 
 YEARS = range(2012, 2025)
@@ -424,6 +424,33 @@ def prepare(path, db, gdp_path=None, geo_paths=None):
             "valueUnit": "current USD, nominal",
             "quantityUnit": "metric tonnes",
         },
+def write_graph(con, out, scratch, countries, year, total):
+    """Load the year's flows into the Ladybug graph, one edge per exporter, importer and heading, and prove no dollar was lost."""
+    edges = Path(scratch) / "edges.parquet"
+    n = con.execute(
+        "COPY (SELECT CAST(exporter AS BIGINT) AS exporter, CAST(importer AS BIGINT) AS importer, left(product, 4) AS heading,"
+        f" CAST(sum(v) * 1000 AS BIGINT) AS valueUsd FROM flows GROUP BY ALL) TO {quoted(edges)} (FORMAT parquet)"
+    ).fetchone()[0]
+    path = out / "graph.lbug"
+    written = graph.build(path, countries, edges if n else None)
+    if written != (n, total):
+        raise PrepareFailed(f"the graph holds {written}, expected {n} edges worth {total} USD")
+    return {"path": path.name, "year": year, "edges": n, "valueUsd": written[1], "bytes": path.stat().st_size, "sha256": sha256(path)}
+
+
+def write_twins(con, out, year):
+    """Store every country's import and export basket of the year as a Milvus vector, and prove each trading country got one."""
+    side = {"imports": "importer", "exports": "exporter"}
+    baskets = {f: con.execute(f"SELECT {c}, product, CAST(sum(v) AS DOUBLE) FROM flows GROUP BY ALL").fetchall() for f, c in side.items()}
+    path = out / "twins.db"
+    written = twins.build(path, baskets)
+    expected = {f: con.execute(f"SELECT count(DISTINCT {c}) FROM flows WHERE v > 0").fetchone()[0] for f, c in side.items()}
+    if written != expected:
+        raise PrepareFailed(f"the twins hold {written} vectors, expected {expected}")
+    size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    return {"path": path.name, "year": year, "metric": "Bhattacharyya coefficient", "vectors": written, "bytes": size}
+
+
         "archive": {
             "filename": path.name,
             "sha256": baci_sha,
@@ -540,6 +567,11 @@ if __name__ == "__main__":
     with client:
         result = prepare(sys.argv[1], database, gdp_path, geo_paths)
     print(f"{result['_id']} {result['status']}: {result['counts']}, {result['errors']['rejectedRows']} rows rejected")
+                if year == YEARS[-1]:
+                    trade_graph = write_graph(
+                        con, out, scratch, [int(r["country_code"]) for r in country_rows], year, world_totals[str(year)]
+                    )
+                    trade_twins = write_twins(con, out, year)
             if tariff_docs:
                 rows = tariff_docs(snapshot_id)
                 while batch := list(itertools.islice(rows, 10_000)):

@@ -1,5 +1,5 @@
 import { lang, t } from "../i18n.js";
-import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, indexColumn, km, kpi, pct, pctColumn, query, reach, scoped, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, indexColumn, km, kpi, pct, pctColumn, query, reach, scoped, state, storeTag, table, twins, usd, usdColumn } from "../lib.js";
 
 const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 const BARS = 15;
@@ -42,7 +42,7 @@ export default async function exports(root, _, params) {
       <p>${t("EXPY weights each product by PRODY, the income per head of the countries that export it, in constant PPP dollars. The fixed line keeps the 2012 PRODY, so it moves only when the basket changes. A year shows no value when a product in the basket lacks a PRODY.")}</p>
       <div class="chart" id="expy"></div></div>` : ""}
     <div class="grid">
-      <div class="panel"><h2>${t("Destinations, {year}", { year: data.year })}</h2><div class="chart tall" id="bars"></div></div>
+      <div class="panel"><h2>${t("Destinations, {year}", { year: data.year })} ${storeTag("MongoDB documents")}</h2><div class="chart tall" id="bars"></div></div>
       <div class="panel"><h2>${t("Destination table")}</h2><div id="destinations"></div></div>
     </div>
     ${far ? `<div class="panel" style="margin-top:1.25rem"><h2>${t("Distance and value, {year}", { year: data.year })}</h2>
@@ -128,4 +128,6 @@ export default async function exports(root, _, params) {
       { title: t("Quality flags"), field: "qualityFlags", headerSort: false, minWidth: 160, formatter: (c) => esc(c.getValue().map((f) => t(f)).join(", ")) },
     ],
   }).on("rowClick", (_, row) => (location.hash = `#/product/${row.getData().productCode}?year=${data.year}`));
+
+  await twins(root, "exports");
 }

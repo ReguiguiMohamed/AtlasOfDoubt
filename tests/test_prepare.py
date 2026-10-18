@@ -24,6 +24,19 @@ FLOWS = {
 }
 
 
+# In 2024 France and the USA sell Tunisia wheat. Italy buys from both and from China, and France buys from Afghanistan.
+NETWORK = {
+    2024: [
+        "2024,251,788,100119,50,1",
+        "2024,251,788,100199,4,1",
+        "2024,842,788,100119,20,1",
+        "2024,251,380,100119,30,1",
+        "2024,842,380,100119,5,1",
+        "2024,156,380,100119,40,1",
+        "2024,4,251,100119,3,1",
+        "2024,251,788,310230,9,1",
+    ],
+}
 def cached(db, snapshot, country, code, year):
     generation = materialize.ensure(db, snapshot, country)
     return db.country_product_years.find_one({"generationId": generation, "productCode": code, "year": year})
@@ -147,6 +160,15 @@ def test_snapshot_records_provenance_counts_and_files(db, make_archive):
 
 def test_missing_year_fails_the_snapshot(db, make_archive):
     with pytest.raises(PrepareFailed, match="Y2020"):
+def test_graph_holds_the_last_year_once_per_exporter_importer_and_heading(db, make_archive):
+    snapshot = prepare(make_archive(NETWORK), db)
+    assert {k: snapshot["graph"][k] for k in ("path", "year", "edges", "valueUsd")} == {
+        "path": "graph.lbug", "year": 2024, "edges": 7, "valueUsd": 161000,
+    }
+    assert snapshot["graph"]["valueUsd"] == snapshot["worldTotals"]["2024"]
+    assert (DATA / snapshot["storage"]["path"] / "graph.lbug").stat().st_size == snapshot["graph"]["bytes"]
+
+
         prepare(make_archive(FLOWS, skip_year=2020), db)
     assert db.snapshots.find_one()["status"] == "failed"
     assert not list(DATA.glob("*.partial"))

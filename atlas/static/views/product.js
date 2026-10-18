@@ -233,8 +233,9 @@ export default async function product(root, [code], params) {
   const alternatives = root.querySelector("#alternatives");
   if (alternatives) {
     const share = Object.fromEntries(ranked.map((s) => [s.countryCode, s.share]));
-    const exporters = table(root.querySelector("#exporters"), {
-      data: current.world.topExporters.map((e) => ({ ...e, reporter: share[e.countryCode] ?? 0 })),
+    const rows = current.exporters.map((e) => ({ ...e, ...data.geography[e.countryCode], reporter: share[e.countryCode] ?? 0 }));
+    const exporters = table(alternatives.querySelector("#exporters"), {
+      data: rows,
       pagination: false,
       rowFormatter: (row) => row.getData().reporter === 0 && row.getElement().classList.add("untapped"),
       columns: [
@@ -298,6 +299,27 @@ async function search(root, q) {
   });
   if (q) run();
 }
+    ${state.snapshot.graph && code.length >= 4 ? `<div class="panel" id="network-panel" style="margin-top:1.25rem">
+      <h2>${t("Supplier network of heading {heading}, {year}", { heading: code.slice(0, 4), year: state.snapshot.graph.year })} ${storeTag("Ladybug graph")}</h2>
+      <p>${t("From the Ladybug trade graph: {reporter} in red, its largest suppliers, the markets buying from the same suppliers, exporters that sell this heading elsewhere but not to {reporter}, and the countries supplying its suppliers. Arrows follow the goods. A two-step link is trade between partners, not a proven supply chain. Drag, zoom and click a country.", { reporter })}</p>
+      <div class="chart tall" id="network"></div></div>` : ""}
+  const walled = root.querySelector("#tariff-panel");
+  if (walled) {
+    api(`/products/${code}/tariffs?${scoped()}`)
+      .then((rates) => {
+        own.tariff = rates.own;
+        return walled.isConnected && tariffWall(walled, rates, reporter, profile);
+      })
+      .catch(() => walled.remove());
+  }
+
+  const graphed = root.querySelector("#network-panel");
+  if (graphed) {
+    api(`/products/${code}/network?${scoped()}`)
+      .then((net) => graphed.isConnected && network(graphed.querySelector("#network"), net, state.reporter.countryName, profile) < 2 && graphed.remove())
+      .catch((e) => (e.status === 503 ? graphed.querySelector("#network").replaceWith(html(unavailable("Ladybug graph")).firstElementChild) : graphed.remove()));
+  }
+
         usdColumn(t("World exports"), "valueUsd"),
         ...geoColumns(),
     const form = alternatives.querySelector("form");
