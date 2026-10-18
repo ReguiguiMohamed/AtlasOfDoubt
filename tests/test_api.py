@@ -390,11 +390,13 @@ def test_each_reporter_sees_only_its_own_flows_whatever_the_visit_order(two, ord
         assert seen[reporter][3] == affected
 
 
-def test_exports_list_destinations_and_products(two):
-    body = two.get("/api/exports", params={"reporter": TUNISIA}).json()
-    assert [(d["countryName"], d["share"]) for d in body["destinations"]] == [("USA", 1)]
+@pytest.mark.parametrize(("reporter", "partner", "value"), [(TUNISIA, "USA", 60000), (USA, "Tunisia", 10000)])
+def test_exports_list_destinations_and_products(two, reporter, partner, value):
+    body = two.get("/api/exports", params={"reporter": reporter}).json()
+    assert [(d["countryName"], d["share"]) for d in body["destinations"]] == [(partner, 1)]
     [horses] = body["products"]
-    assert (horses["productCode"], horses["totalUsd"], horses["rca"]) == ("010121", 60000, 1)
+    assert (horses["productCode"], horses["totalUsd"], horses["rca"]) == ("010121", value, 1)
+    assert "destinations" not in horses
 
 
 def test_an_evicted_view_is_rebuilt_with_the_same_figures(db, two):

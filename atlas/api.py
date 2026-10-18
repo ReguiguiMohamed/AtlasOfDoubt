@@ -581,6 +581,12 @@ def sea_routes(
     }
 
 
+PRODUCT_EXPORT_FIELDS = (
+    "totalUsd", "quantityValidValueUsd", "validQuantityTonnes", "quantityCoverage",
+    "unitValueUsdPerTonne", "rca", "worldShare", "prody", "qualityFlags",
+)
+
+
 @app.get("/api/exports")
 def exports(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None, min_value: MinValue = 0):
     """The reporter's export structure: a yearly trend, its destinations and its products of one year."""
@@ -602,7 +608,8 @@ def exports(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | Non
     ] if chosen else []
     found = db.country_product_years.find(
         {"generationId": generation, "year": year, "exports.totalUsd": {"$gte": min_value}},
-        {"_id": 0, "productCode": 1, "description": 1, "exports": 1},
+        # Each product's destinations, the bulk of the document, are read on the product page instead.
+        {"_id": 0, "productCode": 1, "description": 1} | {f"exports.{f}": 1 for f in PRODUCT_EXPORT_FIELDS},
     ).sort("exports.totalUsd", -1)
     products = [{"productCode": r["productCode"], "description": r["description"], **r["exports"]} for r in found]
     return {
