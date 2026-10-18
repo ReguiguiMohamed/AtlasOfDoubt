@@ -52,10 +52,15 @@ def warm(db):
 @asynccontextmanager
 async def lifespan(app):
     client, app.state.db = connect()
+    # A fill cut short by the last stop is taken over by its next reader instead of waiting out its lease.
+    app.state.db.materializations.update_many({"years": {"$exists": True}}, {"$set": {"leaseUntil": datetime(1970, 1, 1, tzinfo=timezone.utc)}})
     # Tests prepare and delete snapshots under the warm thread's feet, so they turn it off.
     if os.environ.get("ATLAS_WARM", "1") == "1":
         threading.Thread(target=warm, args=(app.state.db,), daemon=True).start()
     yield
+    for thread in threading.enumerate():
+        if thread.name.startswith("fill-"):
+            thread.join(timeout=5)
     client.close()
 
 
@@ -89,11 +94,14 @@ def find_country(snapshot, code, status=404):
     return country
 
 
-def scope(db, snapshot_id, reporter):
-    """The snapshot, the reporter and the generation of the reporter's cached view."""
+def scope(db, snapshot_id, reporter, years=None):
+    """The snapshot, the reporter and the generation of the reporter's cached view.
+
+    A page that reads only some years names them, None standing for the last, so a first visit opens before the other years are built.
+    """
     snapshot = ready_snapshot(db, snapshot_id)
     country = find_country(snapshot, reporter, status=422)
-    return snapshot, country, materialize.ensure(db, snapshot, reporter)
+    return snapshot, country, materialize.ensure(db, snapshot, reporter, years and [checked_year(snapshot, y) for y in years])
 
 
 def checked_year(snapshot, year):
@@ -176,7 +184,7 @@ def categories_named(db, snapshot_id, q, limit=10):
 @app.get("/api/categories")
 def categories(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None):
     """The reporter's imports as a tree of HS sections, chapters, headings and products, each summed exactly."""
-    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    snapshot, _, generation = scope(db, snapshot_id, reporter, [year])
     if not snapshot.get("categories"):
         raise HTTPException(404, f"{snapshot_id} was prepared without HS names")
     year = checked_year(snapshot, year)
@@ -226,7 +234,7 @@ def search_products(db: Db, snapshot_id: SnapshotId, q: str = ""):
 
 @app.get("/api/overview")
 def overview(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None, min_value: MinValue = 0):
-    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    snapshot, _, generation = scope(db, snapshot_id, reporter, [year])
     year = checked_year(snapshot, year)
     found = db.country_product_years.find(
         {"generationId": generation, "year": year, "imports.metrics.totalUsd": {"$gte": min_value}},
@@ -256,9 +264,10 @@ def movers(
     A product counts only if it reached minValue in both years, so a trickle of imports
     that swings from one supplier to another does not crowd out the products that matter.
     """
-    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    snapshot = ready_snapshot(db, snapshot_id)
     start = checked_year(snapshot, start if start is not None else min(snapshot["years"]))
     end = checked_year(snapshot, end)
+    snapshot, _, generation = scope(db, snapshot_id, reporter, [start, end])
 
     def year_rows(year):
         found = db.country_product_years.find(
@@ -405,7 +414,7 @@ def tariffs(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     snapshot's last year. charged holds the suppliers the reporter's own
     schedule gives a preference, with their rate.
     """
-    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    snapshot, _, generation = scope(db, snapshot_id, reporter, [None])
     if not snapshot.get("tariffs"):
         raise HTTPException(404, f"{snapshot_id} has no tariffs")
     if len(code) != 6:
@@ -596,7 +605,7 @@ PRODUCT_EXPORT_FIELDS = (
 @app.get("/api/exports")
 def exports(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None, min_value: MinValue = 0):
     """The reporter's export structure: a yearly trend, its destinations and its products of one year."""
-    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    snapshot, _, generation = scope(db, snapshot_id, reporter, [year])
     year = checked_year(snapshot, year)
     names = names_of(snapshot)
     by_year = {y["year"]: y for y in db.country_years.find({"snapshotId": snapshot_id, "countryCode": reporter}, {"_id": 0})}
@@ -698,14 +707,14 @@ def run_scenario(db, snapshot, generation, spec):
 
 @app.post("/api/scenarios/preview")
 def preview(db: Db, spec: ScenarioSpec):
-    snapshot, _, generation = scope(db, spec.snapshot, spec.reporter)
+    snapshot, _, generation = scope(db, spec.snapshot, spec.reporter, [spec.year])
     result = run_scenario(db, snapshot, generation, spec)
     return {"spec": spec.model_dump(), "calculationVersion": metrics.CALCULATION_VERSION, "result": result}
 
 
 @app.post("/api/reports", status_code=201)
 def create_report(db: Db, request: ReportRequest):
-    snapshot, reporter, generation = scope(db, request.snapshot, request.reporter)
+    snapshot, reporter, generation = scope(db, request.snapshot, request.reporter, [request.year])
     result = run_scenario(db, snapshot, generation, request)
     report = {
         "title": request.title,

@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import zipfile
 
 import pytest
@@ -40,6 +41,10 @@ def db():
     client.close()
     client, database = connect()
     yield database
+    # A first visit's background fill must finish before the next test drops the database under it.
+    for thread in threading.enumerate():
+        if thread.name.startswith("fill-"):
+            thread.join(timeout=30)
     client.close()
 
 

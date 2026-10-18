@@ -7,8 +7,13 @@ from every importer's partition of that year. Each build is one generation of do
 after its job is marked ready, so a failed or interrupted build never
 shows. The least recently used generations are evicted once the cache
 passes its byte budget.
+
+A page that reads only the first and last years, like the overview, does
+not wait for the rest. Those two years are built and readable first, and a
+background thread adds the other years to the same generation.
 """
 
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -31,20 +36,23 @@ RECENT = 3
 WORLD_FIELDS = ("productCode", "year", "totalUsd", "sumSquares", "exporterCount", "unitValueUsdPerTonne", "prody")
 
 
-def ensure(db, snapshot, country, budget=CACHE_BYTES):
-    """Return the ready generation id for this snapshot and country, building it if needed."""
+def ensure(db, snapshot, country, years=None, budget=CACHE_BYTES):
+    """Return the ready generation id for this snapshot and country that holds these years, or every year when none are given."""
     key = {"snapshotId": snapshot["_id"], "countryCode": country}
+    quick = {min(snapshot["years"]), max(snapshot["years"])}
+    split = years is not None and set(years) <= quick
     while True:
         now = datetime.now(timezone.utc)
         job = db.materializations.find_one_and_update({**key, "status": "ready"}, {"$set": {"lastUsedAt": now}})
-        if job:
+        # A job still filling in lists the years it holds so far.
+        if job and ("years" not in job or set(years or snapshot["years"]) <= set(job["years"])):
             return job["generationId"]
         generation = uuid.uuid4().hex
         try:
             # Only a failed job or one whose builder stopped renewing can be taken over. Anything else hits the unique key.
             previous = db.materializations.find_one_and_update(
-                {**key, "$or": [{"status": {"$in": ["failed", "evicted"]}}, {"status": "building", "leaseUntil": {"$lt": now}}]},
-                {"$set": {"status": "building", "generationId": generation, "leaseUntil": now + LEASE, "startedAt": now}},
+                {**key, "$or": [{"status": {"$in": ["failed", "evicted"]}}, {"status": {"$in": ["building", "ready"]}, "leaseUntil": {"$lt": now}}]},
+                {"$set": {"status": "building", "generationId": generation, "leaseUntil": now + LEASE, "startedAt": now}, "$unset": {"years": ""}},
                 upsert=True,
                 return_document=ReturnDocument.BEFORE,
             )
@@ -54,7 +62,7 @@ def ensure(db, snapshot, country, budget=CACHE_BYTES):
         if previous:
             db.country_product_years.delete_many({"generationId": previous["generationId"]})
         try:
-            build(db, snapshot, country, generation)
+            build(db, snapshot, country, generation, quick if split else None)
         except Exception as exc:
             db.materializations.update_one(
                 {**key, "generationId": generation},
@@ -62,27 +70,53 @@ def ensure(db, snapshot, country, budget=CACHE_BYTES):
             )
             db.country_product_years.delete_many({"generationId": generation})
             raise
-        size = next(
-            db.country_product_years.aggregate([
-                {"$match": {"generationId": generation}},
-                {"$group": {"_id": None, "bytes": {"$sum": {"$bsonSize": "$$ROOT"}}}},
-            ]),
-            {"bytes": 0},
-        )["bytes"]
+        ready = {"status": "ready", "bytes": size_of(db, generation), "lastUsedAt": now}
+        # The filler keeps the lease, so a reader can take over if the process stops before the other years are in.
+        update = {"$set": {**ready, "years": sorted(quick)}} if split else {"$set": ready, "$unset": {"leaseUntil": ""}}
         # A builder whose lease was taken over while it ran must not overwrite the newer job.
-        done = db.materializations.update_one(
-            {**key, "generationId": generation, "status": "building"},
-            {"$set": {"status": "ready", "bytes": size, "lastUsedAt": now}, "$unset": {"leaseUntil": ""}},
-        )
+        done = db.materializations.update_one({**key, "generationId": generation, "status": "building"}, update)
         if not done.modified_count:
             db.country_product_years.delete_many({"generationId": generation})
             continue
         evict(db, budget, keep=generation)
+        if split:
+            threading.Thread(
+                target=fill, args=(db, snapshot, country, generation, set(snapshot["years"]) - quick, budget),
+                name=f"fill-{country}", daemon=True,
+            ).start()
         return generation
 
 
+def fill(db, snapshot, country, generation, years, budget):
+    """Add the years a quick first build left out to its generation, then mark the job complete."""
+    key = {"snapshotId": snapshot["_id"], "countryCode": country, "generationId": generation}
+    try:
+        build(db, snapshot, country, generation, years)
+    except Exception as exc:
+        db.materializations.update_one(key, {"$set": {"status": "failed", "failure": str(exc)}, "$unset": {"leaseUntil": "", "years": ""}})
+        db.country_product_years.delete_many({"generationId": generation})
+        return
+    done = db.materializations.update_one(
+        {**key, "status": "ready"}, {"$set": {"bytes": size_of(db, generation)}, "$unset": {"leaseUntil": "", "years": ""}}
+    )
+    if not done.modified_count:
+        db.country_product_years.delete_many({"generationId": generation})
+        return
+    evict(db, budget, keep=generation)
+
+
+def size_of(db, generation):
+    return next(
+        db.country_product_years.aggregate([
+            {"$match": {"generationId": generation}},
+            {"$group": {"_id": None, "bytes": {"$sum": {"$bsonSize": "$$ROOT"}}}},
+        ]),
+        {"bytes": 0},
+    )["bytes"]
+
+
 def evict(db, budget, keep):
-    """Drop the least recently used generations beyond the budget, never the one just built.
+    """Drop the least recently used generations beyond the budget, never the one just built or one still filling in.
 
     The job stays as "evicted" with its last use, so a restart knows which countries to rebuild.
 
@@ -93,7 +127,7 @@ def evict(db, budget, keep):
     used = 0
     for job in db.materializations.find({"status": "ready"}, sort=[("lastUsedAt", -1)]):
         used += job.get("bytes", 0)
-        if used > budget and job["generationId"] != keep:
+        if used > budget and job["generationId"] != keep and "years" not in job:
             db.materializations.update_one(
                 {"_id": job["_id"], "generationId": job["generationId"]}, {"$set": {"status": "evicted"}}
             )
@@ -114,16 +148,18 @@ def rewarm(db, snapshot, count=RECENT):
     return recent
 
 
-def parquet(path):
-    return sorted(p.as_posix() for p in path.glob("*/*.parquet"))
+def parquet(path, years):
+    return sorted(p.as_posix() for p in path.glob("year=*/*.parquet") if int(p.parent.name.removeprefix("year=")) in years)
 
 
-def build(db, snapshot, country, generation):
+def build(db, snapshot, country, generation, years=None):
+    """Write the country's documents of these years, or of every year, into the generation."""
+    years = set(years or snapshot["years"])
     root = DATA / snapshot["storage"]["path"]
-    flow_files = parquet(root / "flows" / f"importer={country}")
-    export_files = parquet(root / "exports" / f"country={country}")
+    flow_files = parquet(root / "flows" / f"importer={country}", years)
+    export_files = parquet(root / "exports" / f"country={country}", years)
     last = max(snapshot["years"])
-    sold_files = sorted(p.as_posix() for p in (root / "flows").glob(f"*/year={last}/*.parquet"))
+    sold_files = sorted(p.as_posix() for p in (root / "flows").glob(f"*/year={last}/*.parquet")) if last in years else []
     with duckdb.connect() as con:
         flows = con.execute(
             "SELECT year, product, exporter, v * 1000, q FROM read_parquet(?, hive_partitioning = true)"
@@ -165,7 +201,7 @@ def build(db, snapshot, country, generation):
     worlds = {
         (w["productCode"], w["year"]): w
         for w in db.world_product_years.find(
-            {"snapshotId": snapshot["_id"], "productCode": {"$in": codes}},
+            {"snapshotId": snapshot["_id"], "productCode": {"$in": codes}, "year": {"$in": sorted(years)}},
             # The country itself may be one of the top exporters, so one more than the alternatives kept.
             {**{f: 1 for f in WORLD_FIELDS}, "topExporters": {"$slice": WORLD_ALTERNATIVES + 1}},
         )

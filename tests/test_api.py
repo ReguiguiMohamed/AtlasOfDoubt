@@ -1,5 +1,6 @@
 import os
 import shutil
+import threading
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -409,6 +410,37 @@ def test_an_evicted_view_is_rebuilt_with_the_same_figures(db, two):
     assert figures(two, TUNISIA)[0] == 40000
 
 
+def stored(db, generation):
+    return sorted(db.country_product_years.find({"generationId": generation}, {"_id": 0, "generationId": 0}),
+                  key=lambda d: (d["productCode"], d["year"]))
+
+
+def test_a_first_visit_opens_on_the_first_and_last_years_and_fills_in_the_rest(db, make_archive, monkeypatch):
+    snapshot = db.snapshots.find_one({"_id": prepare(make_archive({**FLOWS, **NETWORK}), db)["_id"]})
+    gate, fill = threading.Event(), materialize.fill
+    monkeypatch.setattr(materialize, "fill", lambda *args: gate.wait() and fill(*args))
+    generation = materialize.ensure(db, snapshot, TUNISIA, [2024])
+    assert db.materializations.find_one({"countryCode": TUNISIA})["years"] == [2012, 2024]
+    assert sorted(db.country_product_years.distinct("year", {"generationId": generation})) == [2012, 2024]
+    gate.set()
+    assert materialize.ensure(db, snapshot, TUNISIA) == generation
+    assert "years" not in db.materializations.find_one({"countryCode": TUNISIA})
+    materialize.build(db, snapshot, TUNISIA, "whole")
+    assert stored(db, generation) == stored(db, "whole")
+
+
+def test_a_fill_that_stopped_is_taken_over_once_its_lease_expires(db, make_archive, monkeypatch):
+    snapshot = db.snapshots.find_one({"_id": prepare(make_archive({**FLOWS, **NETWORK}), db)["_id"]})
+    monkeypatch.setattr(materialize, "fill", lambda *args: None)
+    partial = materialize.ensure(db, snapshot, TUNISIA, [2012])
+    db.materializations.update_one({"countryCode": TUNISIA}, {"$set": {"leaseUntil": datetime.now(timezone.utc) - timedelta(minutes=1)}})
+    whole = materialize.ensure(db, snapshot, TUNISIA)
+    assert whole != partial
+    assert "years" not in db.materializations.find_one({"countryCode": TUNISIA})
+    assert sorted(db.country_product_years.distinct("year", {"generationId": whole})) == [2012, 2015, 2024]
+    assert not db.country_product_years.count_documents({"generationId": partial})
+
+
 def test_a_restart_rebuilds_the_countries_visited_last_the_latest_last(db, two):
     snapshot = db.snapshots.find_one({"_id": two.snapshot})
     materialize.ensure(db, snapshot, USA, budget=1)
@@ -422,7 +454,7 @@ def test_a_restart_rebuilds_the_countries_visited_last_the_latest_last(db, two):
 def test_a_failed_build_leaves_nothing_readable(db, two, monkeypatch):
     snapshot = db.snapshots.find_one({"_id": two.snapshot})
 
-    def broken(db, snapshot, country, generation):
+    def broken(db, snapshot, country, generation, years):
         db.country_product_years.insert_one({"generationId": generation, "productCode": "010121", "year": 2012})
         raise RuntimeError("disk full")
 
