@@ -236,8 +236,11 @@ def main():
     fetch(PARTNERS, folder / "countries.xml")
     fetch(BENEFICIARIES, folder / "TRAINSPreferenceBenficiaries.xls")
     with open(coverage, encoding="utf-8") as f:
-        baci = {r["iso3"]: int(r["country_code"]) for r in csv.DictReader(f)}
+        countries = list(csv.DictReader(f))
+    baci = {r["iso3"]: int(r["country_code"]) for r in countries}
     partners = read_partners(folder / "countries.xml", folder / "TRAINSPreferenceBenficiaries.xls", baci)
+    # Some partner lists name a country by its BACI code, which the WITS country list lacks.
+    partners = {r["country_code"]: (r["name"], False, [int(r["country_code"])]) for r in countries} | partners
     used = {p: partners.get(p, (p, True, [])) for p in sorted({p for _, _, p in pairs})}
     with open(DATA / "tariff-partners.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
