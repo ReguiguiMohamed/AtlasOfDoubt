@@ -34,13 +34,19 @@ CODE_PATTERN = r"^\d{2}(\d{2}){0,2}$"
 
 
 def warm(db):
-    """Open the newest snapshot's Milvus twins and Ladybug graph, which otherwise cost the first visitor about 2 s."""
+    """Open the newest snapshot's Milvus twins and Ladybug graph, then build the countries visited last.
+
+    The stores otherwise cost the first visitor about 2 s, and a country's first visit up to 2 min.
+    """
     snapshot = db.snapshots.find_one({"status": "ready"}, sort=[("preparedAt", -1)])
+    if not snapshot:
+        return
     for part, opened in (("twins", twins.opened), ("graph", graph.opened)):
-        if snapshot and snapshot.get(part):
+        if snapshot.get(part):
             path = DATA / snapshot["storage"]["path"] / snapshot[part]["path"]
             if path.exists():
                 opened(path)
+    materialize.rewarm(db, snapshot)
 
 
 @asynccontextmanager

@@ -403,10 +403,20 @@ def test_an_evicted_view_is_rebuilt_with_the_same_figures(db, two):
     snapshot = db.snapshots.find_one({"_id": two.snapshot})
     first = materialize.ensure(db, snapshot, TUNISIA, budget=1)
     materialize.ensure(db, snapshot, USA, budget=1)
-    assert db.materializations.find_one({"countryCode": TUNISIA}) is None
+    assert db.materializations.find_one({"countryCode": TUNISIA})["status"] == "evicted"
     assert db.country_product_years.count_documents({"generationId": first}) == 0
     assert figures(two, TUNISIA) == figures(two, TUNISIA)
     assert figures(two, TUNISIA)[0] == 40000
+
+
+def test_a_restart_rebuilds_the_countries_visited_last_the_latest_last(db, two):
+    snapshot = db.snapshots.find_one({"_id": two.snapshot})
+    materialize.ensure(db, snapshot, USA, budget=1)
+    materialize.ensure(db, snapshot, TUNISIA, budget=1)
+    assert db.materializations.find_one({"countryCode": USA})["status"] == "evicted"
+    assert materialize.rewarm(db, snapshot) == [TUNISIA, USA]
+    jobs = list(db.materializations.find(sort=[("lastUsedAt", -1)]))
+    assert [(j["countryCode"], j["status"]) for j in jobs] == [(TUNISIA, "ready"), (USA, "ready")]
 
 
 def test_a_failed_build_leaves_nothing_readable(db, two, monkeypatch):

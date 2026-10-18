@@ -27,6 +27,7 @@ POLL = 0.5
 WORLD_ALTERNATIVES = 5
 INSERT_BATCH = 2000
 INSERT_THREADS = 4
+RECENT = 3
 WORLD_FIELDS = ("productCode", "year", "totalUsd", "sumSquares", "exporterCount", "unitValueUsdPerTonne", "prody")
 
 
@@ -42,7 +43,7 @@ def ensure(db, snapshot, country, budget=CACHE_BYTES):
         try:
             # Only a failed job or one whose builder stopped renewing can be taken over. Anything else hits the unique key.
             previous = db.materializations.find_one_and_update(
-                {**key, "$or": [{"status": "failed"}, {"status": "building", "leaseUntil": {"$lt": now}}]},
+                {**key, "$or": [{"status": {"$in": ["failed", "evicted"]}}, {"status": "building", "leaseUntil": {"$lt": now}}]},
                 {"$set": {"status": "building", "generationId": generation, "leaseUntil": now + LEASE, "startedAt": now}},
                 upsert=True,
                 return_document=ReturnDocument.BEFORE,
@@ -83,6 +84,8 @@ def ensure(db, snapshot, country, budget=CACHE_BYTES):
 def evict(db, budget, keep):
     """Drop the least recently used generations beyond the budget, never the one just built.
 
+    The job stays as "evicted" with its last use, so a restart knows which countries to rebuild.
+
     ponytail: a request that read a job just before its eviction sees an empty
     generation once, and the next request rebuilds. Add a reader count if that
     ever shows up in practice.
@@ -91,8 +94,24 @@ def evict(db, budget, keep):
     for job in db.materializations.find({"status": "ready"}, sort=[("lastUsedAt", -1)]):
         used += job.get("bytes", 0)
         if used > budget and job["generationId"] != keep:
-            db.materializations.delete_one({"_id": job["_id"], "generationId": job["generationId"]})
+            db.materializations.update_one(
+                {"_id": job["_id"], "generationId": job["generationId"]}, {"$set": {"status": "evicted"}}
+            )
             db.country_product_years.delete_many({"generationId": job["generationId"]})
+
+
+def rewarm(db, snapshot, count=RECENT):
+    """Build the snapshot's view for the countries visited last in any snapshot, the latest built last so it stays newest."""
+    known = {c["countryCode"] for c in snapshot["countries"]}
+    recent = []
+    for job in db.materializations.find({"lastUsedAt": {"$exists": True}}, {"countryCode": 1}, sort=[("lastUsedAt", -1)]):
+        if job["countryCode"] in known and job["countryCode"] not in recent:
+            recent.append(job["countryCode"])
+        if len(recent) == count:
+            break
+    for country in reversed(recent):
+        ensure(db, snapshot, country)
+    return recent
 
 
 def parquet(path):
