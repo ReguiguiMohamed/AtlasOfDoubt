@@ -12,6 +12,29 @@ const routes = { overview, exports, product, country, routes: seaRoutes, scenari
 const main = document.getElementById("view");
 const picker = document.getElementById("snapshot");
 const reporterPicker = document.getElementById("reporter");
+const navigation = document.getElementById("navigation");
+const menu = document.getElementById("nav-toggle");
+
+function setMenu(open) {
+  menu.setAttribute("aria-expanded", String(open));
+  document.getElementById("menu-label").textContent = t(open ? "Close" : "Menu");
+  document.getElementById("menu-icon").textContent = open ? "×" : "☰";
+  navigation.classList.toggle("open", open);
+}
+
+menu.addEventListener("click", () => setMenu(menu.getAttribute("aria-expanded") !== "true"));
+navigation.addEventListener("click", (event) => {
+  if (event.target.closest("a")) setMenu(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && menu.getAttribute("aria-expanded") === "true") {
+    setMenu(false);
+    menu.focus();
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".top")) setMenu(false);
+});
 
 function remembered(key) {
   try {
@@ -55,17 +78,28 @@ async function render() {
   const [path, search] = location.hash.replace(/^#\/?/, "").split("?");
   const [name, ...rest] = path.split("/");
   const view = routes[name] ?? overview;
-  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", routes[a.dataset.nav] === view));
+  document.querySelectorAll("[data-nav]").forEach((a) => {
+    const active = routes[a.dataset.nav] === view;
+    a.classList.toggle("active", active);
+    if (active) {
+      a.setAttribute("aria-current", "page");
+      document.getElementById("current-page").textContent = a.textContent;
+      menu.setAttribute("aria-label", `${t("Browse pages")}: ${a.textContent}`);
+    } else a.removeAttribute("aria-current");
+  });
+  setMenu(false);
   disposeCharts();
   // A slow view keeps writing into its own detached section, never into the next one.
   const section = document.createElement("section");
   main.replaceChildren(section);
+  window.scrollTo({ top: 0, behavior: "instant" });
   if (!state.snapshot) {
     section.innerHTML = `<div class="empty"><h1>${t("No snapshot yet")}</h1><p>${t("Prepare a BACI release first:")}</p>
       <pre>python -m atlas.prepare data/raw/BACI_HS12_V202601.zip</pre></div>`;
     return;
   }
   section.setAttribute("aria-busy", "true");
+  section.dataset.loading = t("Loading trade data...");
   try {
     await snapshotDetail();
     reporterPicker.innerHTML = `<option value="">${t("Choose")}</option>${[...state.detail.countries]
@@ -96,6 +130,7 @@ function showCitation() {
 }
 
 document.querySelectorAll("[data-i18n]").forEach((node) => (node.textContent = t(node.textContent)));
+navigation.setAttribute("aria-label", t("Main navigation"));
 document.querySelectorAll("[data-lang]").forEach((button) => {
   button.classList.toggle("active", button.dataset.lang === lang);
   button.addEventListener("click", () => button.dataset.lang !== lang && switchLang(button.dataset.lang));

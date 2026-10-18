@@ -52,6 +52,7 @@ function network(node, net, reporter, pick) {
       categories,
       force: { repulsion: 260, edgeLength: [50, 170], gravity: 0.08 },
       label: { show: true, position: "right", color: css("--ink"), fontSize: 11 },
+      labelLayout: { hideOverlap: true },
       lineStyle: { color: "source", opacity: 0.55, curveness: 0.15 },
       edgeSymbol: ["none", "arrow"],
       edgeSymbolSize: 7,
@@ -349,6 +350,7 @@ export default async function product(root, [code], params) {
   root.append(html(`
     <div class="head">
       ${crumbs}
+      <a class="back-link" href="#/product">← ${t("Find another product")}</a>
       <h1><span class="code">${esc(code)}</span> ${esc(title)}</h1>
       <p class="lede">${single || !named ? "" : `${esc(size)}. `}${t(single ? "HS6 product {code}, in heading {heading} of chapter {chapter}." : "Every HS6 product whose code starts with {code}. Supplier values are summed across the group before shares and the HHI are computed.", { code, heading: code.slice(0, 4), chapter: code.slice(0, 2) })}
         ${t("Gaps in the trend are years with no recorded flow into {reporter}.", { reporter })}</p>

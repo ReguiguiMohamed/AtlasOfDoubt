@@ -94,7 +94,8 @@ export default async function seaRoutes(root, _, params) {
         coordinateSystem: "geo",
         z: 3,
         symbolSize: (v) => 8 + 22 * Math.sqrt(v[2] / largest),
-        label: { show: true, position: "right", color: css("--ink"), fontSize: 11, formatter: (p) => t(p.data.item.name) },
+        label: { show: true, position: "right", color: css("--ink"), fontSize: 11, backgroundColor: "#ffffffeb", padding: [3, 5], borderRadius: 3, formatter: (p) => t(p.data.item.name) },
+        labelLayout: { hideOverlap: true },
         data: data.chokepoints.map((c) => ({
           name: c.name,
           value: [...c.at, c.valueUsd],

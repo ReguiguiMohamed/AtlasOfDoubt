@@ -92,7 +92,7 @@ link opens on the same one. Without it the app asks for a country first.
 
 | Route | View |
 | --- | --- |
-| `#/overview?year&minValue` | every product the reporter imported in a year with its concentration, a sunburst of its imports by HS section, chapter, heading and product that links to where a chapter or heading comes from, the "Choice or structure?" quadrant of its HHI against the world's and the products whose HHI rose or fell the most since an earlier year, and the reporter's import twins on a map and in bars split by the products they share most |
+| `#/overview?year&minValue` | every product the reporter imported in a year with its concentration, a donut and ranked list of its imports that drill from HS sections through chapters and headings to products, the "Choice or structure?" quadrant of its HHI against the world's and the products whose HHI rose or fell the most since an earlier year, and the reporter's import twins on a full-width map above bars split by the products they share most |
 | `#/exports?year&minValue` | exports and imports from 2012 to 2024, product and destination HHI, EXPY when GDP was prepared, destinations with their distance, border and language, a bubble chart of each destination's value against its distance with the fitted trend, and each product with its world share, RCA, unit value and quality flags, and the reporter's export twins on a map and in bars split by the products they share most |
 | `#/country` and `#/country/{code}?year` | every partner country with a search box, then one partner: its distance in km between the most populated cities, a shared border or official language, whether it is landlocked, its modelled sea route, what it supplied and bought back each year, the products it supplies and its rank among their suppliers |
 | `#/routes?year&code&select` | supplier value summed per sea route and per chokepoint on a map, for all products or one code, with a detail panel for the selected route or strait: trend, countries, the products most exposed and a link to simulate its closure |
@@ -101,12 +101,15 @@ link opens on the same one. Without it the app asks for a country first.
 | `#/reports` and `#/reports/{id}` | the reporter's saved reports with provenance, limitations, CSV download and a print layout that keeps every table row |
 
 Both maps zoom with the wheel, a pinch or the + and − buttons, and pan by dragging. Whole world resets them.
+Maps use the 1:50m Natural Earth boundaries distributed in world-atlas 2.0.2.
+Twin-map colors show relative similarity rank. Tooltips and bars keep the actual scores.
 
-Every other chart zooms with Ctrl and the wheel or a box drawn after its zoom
+Charts with axes zoom with Ctrl and the wheel or a box drawn after their zoom
 button, pans with a mouse drag and resets on a double-click. A plain wheel or
 a finger still scrolls the page. Bar charts zoom along their categories only.
 Scatter charts zoom both axes, which spreads a crowd of dots apart. The same
-toolbar saves the chart as a PNG.
+Save image downloads a PNG without the zoom controls. On phones, Menu opens
+every page, and product, country and report details link back to their lists.
 
 Each view renders into a fresh section, so a slow request from a view the
 reader already left writes into a detached node instead of the current page.
@@ -126,6 +129,9 @@ reporter.
 
 `pytest -q` runs 89 tests against a local MongoDB on port 27017. CI starts a
 MongoDB 9.0 service for them.
+
+`node --test tests/frontend.test.mjs` checks chart tooltip confinement, toolbar
+spacing, zoom axes, reset and narrow-screen label settings without MongoDB.
 
 | Guarantee | Tests |
 | --- | --- |

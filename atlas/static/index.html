@@ -27,7 +27,8 @@
 <body>
   <header class="top">
     <a class="brand" href="#/overview"><img src="logo.svg" alt="">Atlas <em>of</em> Doubt</a>
-    <nav>
+    <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="navigation" aria-expanded="false"><span id="current-page"></span><span><span id="menu-label" data-i18n>Menu</span> <span id="menu-icon" aria-hidden="true">☰</span></span></button>
+    <nav id="navigation" aria-label="Main navigation">
       <a href="#/overview" data-nav="overview" data-i18n>Imports</a>
       <a href="#/exports" data-nav="exports" data-i18n>Exports</a>
       <a href="#/product" data-nav="product" data-i18n>Product</a>

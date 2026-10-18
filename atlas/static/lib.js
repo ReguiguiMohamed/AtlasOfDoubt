@@ -70,20 +70,48 @@ export function html(markup) {
 export const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 const charts = new Set();
+const chartResize = new ResizeObserver((entries) => entries.forEach(({ target }) => echarts.getInstanceByDom(target)?.resize()));
 
 export function chart(node, option) {
   const instance = echarts.init(node);
+  const labels = (axes) => [axes].flat().map((a) => ({ ...a, axisLabel: { hideOverlap: true, ...a.axisLabel } }));
   instance.setOption({
     color: [css("--accent"), css("--warn"), css("--muted"), css("--accent-2")],
     textStyle: { fontFamily: css("--font"), color: css("--ink") },
     animationDuration: 300,
+    animation: !matchMedia("(prefers-reduced-motion: reduce)").matches,
     ...option,
+    ...(option.xAxis && { xAxis: labels(option.xAxis), yAxis: labels(option.yAxis) }),
+    ...(option.legend && { legend: { ...option.legend, type: "scroll", top: option.xAxis ? 46 : 0, left: 8, right: 8, tooltip: { show: true } } }),
     // Unconfined, a tooltip near the chart edge spills past the page.
-    tooltip: { confine: true, ...option.tooltip },
+    tooltip: {
+      confine: true,
+      backgroundColor: css("--surface"), borderColor: css("--line"),
+      textStyle: { color: css("--ink"), fontFamily: css("--font"), fontSize: 13, lineHeight: 20 },
+      extraCssText: "max-width:min(360px, calc(100% - 24px)); white-space:normal; overflow-wrap:anywhere; box-shadow:0 4px 18px #14213d14;",
+      ...option.tooltip,
+    },
     ...(option.xAxis && interactive(option)),
   });
-  if (option.xAxis) instance.getZr().on("dblclick", () => instance.dispatchAction({ type: "dataZoom", start: 0, end: 100 }));
+  if (option.xAxis) {
+    instance.getZr().on("dblclick", () => instance.dispatchAction({ type: "dataZoom", start: 0, end: 100 }));
+    const save = document.createElement("button");
+    save.className = "chart-save";
+    save.type = "button";
+    save.textContent = t("Save image");
+    save.title = t("Save as image");
+    save.addEventListener("click", () => {
+      const link = document.createElement("a");
+      link.href = instance.getDataURL({ type: "png", backgroundColor: css("--surface"), pixelRatio: 2, excludeComponents: ["toolbox"] });
+      link.download = `AtlasOfDoubt-${node.id || "chart"}.png`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+    });
+    node.append(save);
+  }
   charts.add(instance);
+  chartResize.observe(node);
   return instance;
 }
 
@@ -92,21 +120,33 @@ const finePointer = matchMedia("(pointer: fine)").matches;
 // Category axes zoom to fewer bars or years. Value axes zoom only where dots crowd, since a zoomed bar loses its base.
 function interactive(option) {
   const series = option.series ?? [];
-  const pick = (axes) => [axes].flat().flatMap((a, i) => (a.type === "category" || series.some((s) => s.type === "scatter") ? [i] : []));
+  const scatter = series.some((s) => s.type === "scatter") && !series.some((s) => s.type === "bar");
+  const pick = (axes) => [axes].flat().flatMap((a, i) => (a.type === "category" || scatter ? [i] : []));
   const x = pick(option.xAxis);
   const y = pick(option.yAxis);
   // A plain wheel or a finger drag still scrolls the page. Ctrl and the wheel zoom, a mouse drag pans.
   const inside = (key, index) => ({ type: "inside", [key]: index, filterMode: "none", zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false, moveOnMouseMove: finePointer });
   return {
-    grid: { ...option.grid, top: Math.max(option.grid?.top ?? 60, 30) },
+    grid: { ...option.grid, top: Math.max(option.grid?.top ?? 60, option.legend ? 86 : 48) },
+    ...(y.length && [option.yAxis].flat().some((a) => a.type === "category") && {
+      yAxis: [option.yAxis].flat().map((a) => ({ ...a, axisLabel: { hideOverlap: true, width: (option.grid?.left ?? 110) - 16, overflow: "truncate", ...a.axisLabel } })),
+      media: [{ query: { maxWidth: 480 }, option: {
+        grid: { left: Math.min(option.grid?.left ?? 110, 100), right: Math.min(option.grid?.right ?? 30, 50) },
+        yAxis: [option.yAxis].flat().map((a) => ({ axisLabel: { width: Math.min(option.grid?.left ?? 110, 100) - 16, overflow: "truncate" } })),
+      } }, { option: {
+        grid: { left: option.grid?.left ?? 110, right: option.grid?.right ?? 30 },
+        yAxis: [option.yAxis].flat().map((a) => ({ axisLabel: { width: a.axisLabel?.width ?? (option.grid?.left ?? 110) - 16 } })),
+      } }],
+    }),
     dataZoom: [...(x.length ? [inside("xAxisIndex", x)] : []), ...(y.length ? [inside("yAxisIndex", y)] : [])],
     toolbox: {
-      right: 4, top: 0, itemSize: 14,
+      right: 112, top: 8, itemSize: 18, itemGap: 16,
+      showTitle: false,
+      tooltip: { show: true, confine: true, formatter: (p) => esc(p.title) },
       iconStyle: { borderColor: css("--muted") },
       emphasis: { iconStyle: { borderColor: css("--accent") } },
       feature: {
         dataZoom: { xAxisIndex: x.length ? x : false, yAxisIndex: y.length ? y : false, filterMode: "none", title: { zoom: t("Zoom: drag a box, or Ctrl and the wheel"), back: t("Undo zoom") } },
-        saveAsImage: { title: t("Save as image"), backgroundColor: css("--surface"), pixelRatio: 2 },
       },
     },
     // Hovering one series fades the others.
@@ -115,19 +155,21 @@ function interactive(option) {
 }
 
 export function disposeCharts() {
+  chartResize.disconnect();
   charts.forEach((c) => c.dispose());
   charts.clear();
 }
 
 const resizeCharts = () => charts.forEach((c) => c.resize());
 window.addEventListener("resize", resizeCharts);
+document.fonts.ready.then(resizeCharts);
 // A printed page is narrower than the screen, and a canvas keeps the width it was drawn at.
 matchMedia("print").addEventListener("change", resizeCharts);
 
 export const axis = () => ({
   axisLine: { lineStyle: { color: css("--line") } },
   splitLine: { lineStyle: { color: css("--line") } },
-  axisLabel: { color: css("--muted") },
+  axisLabel: { color: css("--muted"), hideOverlap: true },
 });
 
 export function table(node, options) {
@@ -228,7 +270,7 @@ export const kpi = (label, value, note = "") =>
 export function zoomable(instance, component) {
   const at = (option) => instance.setOption({ [component]: [option] });
   const zoom = (by) => at({ zoom: Math.min(8, Math.max(1, (instance.getOption()[component][0].zoom ?? 1) * by)) });
-  const controls = html(`<div class="zoom">
+  const controls = html(`<div class="zoom" role="group" aria-label="${t("Map controls")}">
     <button type="button" title="${t("Zoom in")}" aria-label="${t("Zoom in")}">+</button>
     <button type="button" title="${t("Zoom out")}" aria-label="${t("Zoom out")}">−</button>
     <button type="button">${t("Whole world")}</button></div>`).firstElementChild;
@@ -240,11 +282,12 @@ export function zoomable(instance, component) {
   // The map moves at once on roam, so animated series would trail behind it.
   instance.setOption({ animationDurationUpdate: 0 });
   instance.getDom().append(controls);
+  instance.getDom().append(html(`<a class="map-credit" href="https://www.naturalearthdata.com/" target="_blank" rel="noopener noreferrer">Natural Earth</a>`));
   return instance;
 }
 
-const ATLAS = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json";
-const ATLAS_SRI = "sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf";
+const ATLAS = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json";
+const ATLAS_SRI = "sha384-Aw4s9pX1PTPntIYkZ/qV9IYiF5Gv8eTl6Dd/TT56zfO1Wwd+owFwYUuuXNUMrWkc";
 // BACI keeps a few pre-ISO country codes where world-atlas uses the current ISO 3166 numeric ones.
 const ISO = { 251: 250, 490: 158, 579: 578, 699: 356, 757: 756, 842: 840 };
 export const shapeId = (code) => String(ISO[code] ?? code).padStart(3, "0");
@@ -290,6 +333,11 @@ export const unavailable = (store) =>
 // Shared products stack in rank order, and what the closest twins share beyond them fills the rest of the bar.
 const SHARED_COLORS = ["--accent", "--sold", "--supply"];
 
+export function relativeRanks(values) {
+  const sorted = [...new Set(values)].sort((a, b) => a - b);
+  return new Map(sorted.map((value, i) => [value, sorted.length > 1 ? i / (sorted.length - 1) : 0.5]));
+}
+
 // The trade twins of the reporter for one flow: a map of every country's similarity and the ten closest with what they share.
 export async function twins(root, flow) {
   if (!state.snapshot.twins) return;
@@ -304,28 +352,30 @@ export async function twins(root, flow) {
   }
   const reporter = esc(state.reporter.countryName);
   const closest = [...data.closest].reverse();
+  const ranks = relativeRanks(data.similar.map((s) => s.similarity));
+  const score = new Intl.NumberFormat(lang, { minimumFractionDigits: 3, maximumFractionDigits: 6 });
   const products = (s) => s.shared.map((p) => `${esc(p.productCode)} ${esc(p.description)}: ${pct(p.share)} / ${pct(p.twinShare)}`).join("<br>");
-  const tip = (s) => `<b>${esc(s.countryName)}</b>: ${index(s.similarity)}` + (s.shared ? `<br>${t("{reporter} / twin share of {flow}", { reporter, flow: t(flow) })}<br>${products(s)}` : "");
+  const tip = (s) => `<b>${esc(s.countryName)}</b>: ${score.format(s.similarity)}` + (s.shared ? `<br>${t("{reporter} / twin share of {flow}", { reporter, flow: t(flow) })}<br>${products(s)}` : "");
   const panel = html(`<div class="panel" style="margin-top:1.25rem">${heading}
     <p>${t("The countries whose {flow} look most like those of {reporter}. Each basket is a sparse vector of square-rooted product shares in Milvus, so the score is the Bhattacharyya coefficient: 1 for the same mix, 0 when no product is shared. Each bar splits the score into the products the two share most. Twins trade alike and need not trade with each other.", { reporter, flow: t(flow) })}</p>
-    <div class="grid"><div class="chart map" id="twins-map-${flow}"></div><div class="chart tall" id="twins-${flow}"></div></div></div>`).firstElementChild;
+    <p class="map-key"><span><i></i>${esc(state.reporter.countryName)}</span> ${t("Colors show relative similarity rank. Hover for the actual score.")}</p>
+    <div class="twins-layout"><div class="chart map" id="twins-map-${flow}"></div><div class="chart tall" id="twins-${flow}"></div></div></div>`).firstElementChild;
   root.append(panel);
 
-  const top = data.closest[0]?.similarity || 1;
   loadWorld()
     .then(() => panel.isConnected && zoomable(chart(panel.querySelector(`#twins-map-${flow}`), {
-      tooltip: { formatter: (p) => (p.data?.twin ? tip(p.data.twin) : "") },
+      tooltip: { formatter: (p) => (p.data?.twin ? tip(p.data.twin) : p.data?.name === shapeId(data.reporter) ? `<b>${reporter}</b>` : "") },
       visualMap: {
-        min: 0, max: top, orient: "horizontal", left: "center", bottom: 0, itemWidth: 10, itemHeight: 120,
-        text: [index(top), "0"], textStyle: { color: css("--muted") },
-        inRange: { color: [css("--accent-soft"), css("--accent")] },
+        min: 0, max: 1, orient: "horizontal", left: "center", bottom: 0, itemWidth: 10, itemHeight: 90,
+        text: [t("More similar"), t("Less similar")], textStyle: { color: css("--muted"), fontSize: 10 },
+        inRange: { color: ["#eaf2f7", "#7bb5b4", css("--accent")] },
       },
       series: [{
         type: "map", map: "world", selectedMode: false, left: 0, right: 0, top: 0, bottom: 34,
         itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
         emphasis: { label: { show: false }, itemStyle: { areaColor: css("--sold") } },
         data: [
-          ...data.similar.map((s) => ({ name: shapeId(s.countryCode), value: s.similarity, twin: data.closest.find((c) => c.countryCode === s.countryCode) ?? s })),
+          ...data.similar.map((s) => ({ name: shapeId(s.countryCode), value: ranks.get(s.similarity), twin: data.closest.find((c) => c.countryCode === s.countryCode) ?? s })),
           { name: shapeId(data.reporter), itemStyle: { areaColor: css("--warn") }, twin: null },
         ],
       }],
@@ -341,7 +391,8 @@ export async function twins(root, flow) {
     series: [
       ...SHARED_COLORS.map((color, i) => ({
         type: "bar", stack: "score", data: part(i), itemStyle: { color: css(color) },
-        label: i ? { show: false } : { show: true, position: "insideLeft", color: "#fff", fontSize: 10, formatter: (p) => closest[p.dataIndex].shared[0]?.productCode ?? "" },
+        label: i ? { show: false } : { show: true, position: "insideLeft", color: "#fff", fontSize: 10,
+          formatter: (p) => p.value * (panel.querySelector(`#twins-${flow}`).clientWidth - 140) >= 44 ? closest[p.dataIndex].shared[0]?.productCode ?? "" : "" },
       })),
       {
         type: "bar", stack: "score", data: closest.map((s, n) => Math.max(0, s.similarity - SHARED_COLORS.reduce((a, _, i) => a + part(i)[n], 0))),

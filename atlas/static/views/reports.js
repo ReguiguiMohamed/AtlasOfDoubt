@@ -41,6 +41,7 @@ async function report(root, id) {
     : t("{scope}, {year}, a {cut} cut from {count} suppliers.", { scope, year: spec.year, cut, count: spec.suppliers.length });
   root.append(html(`
     <div class="head">
+      <a class="back-link" href="#/reports">← ${t("All reports")}</a>
       <h1>${esc(r.title)}</h1>
       <p class="lede">${esc(t("Saved {date}.", { date: stamp.format(new Date(r.createdAt)) }))} ${esc(summary)}</p>
       <div class="controls">

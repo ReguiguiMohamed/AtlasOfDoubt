@@ -5,40 +5,76 @@ import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctCo
 const HIGH = 0.25;
 const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 
-// A sunburst of the reporter's imports by HS level. Each section keeps its own hue, and each ring a lighter shade of it.
 async function categories(panel, year) {
   const tree = await api(`/categories?${scoped({ year })}`).catch(() => null);
   if (!tree || !panel.isConnected) return panel?.remove();
   const reporter = esc(state.reporter.countryName);
-  const node = (n) => ({ name: n.name, code: n.code, value: n.valueUsd, children: n.children.length ? n.children.map(node) : undefined });
+  const colors = ["#1f5f8b", "#31988b", "#d4a04c", "#7871a8", "#c87869", "#6c9cb8", "#849b66", "#a67b9b", "#537a88", "#b69461"];
+  const path = [{ name: t("All imports"), valueUsd: tree.totalUsd, children: tree.sections }];
+  const back = panel.querySelector("#category-back");
+  const heading = panel.querySelector("#category-current");
+  const list = panel.querySelector("#category-list");
   const pick = panel.querySelector("#category-pick");
-  chart(panel.querySelector("#sunburst"), {
-    color: tree.sections.map((_, i) => `hsl(${(i * 137.5) % 360} 55% 48%)`),
+  const plot = chart(panel.querySelector("#import-donut"), {
+    color: colors,
     tooltip: {
-      formatter: (p) => (p.data?.code ? `<b>${esc(p.data.code)}</b> ${esc(p.data.name)}<br>${t("{value}, {share} of the imports of {reporter}", { value: usd(p.value), share: pct(p.value / tree.totalUsd), reporter })}` : ""),
+      formatter: (p) => `<b>${esc(p.data.code)}</b> ${esc(p.name)}<br>${t("{value}, {share} of the imports of {reporter}", { value: usd(p.value), share: pct(p.value / tree.totalUsd), reporter })}`,
     },
     series: [{
-      type: "sunburst",
-      data: tree.sections.map(node),
-      radius: ["10%", "96%"],
-      sort: null,
-      nodeClick: "rootToNode",
-      itemStyle: { borderColor: css("--surface"), borderWidth: 1 },
-      label: { color: "#fff", fontSize: 10, minAngle: 8, overflow: "truncate" },
-      levels: [
-        {},
-        { r0: "10%", r: "34%", label: { rotate: "tangential", width: 90 } },
-        { r0: "34%", r: "60%", label: { width: 110 }, itemStyle: { opacity: 0.85 } },
-        { r0: "60%", r: "80%", label: { show: false }, itemStyle: { opacity: 0.7 } },
-        { r0: "80%", r: "96%", label: { show: false }, itemStyle: { opacity: 0.55 } },
-      ],
+      type: "pie", radius: ["57%", "86%"], center: ["50%", "50%"],
+      itemStyle: { borderColor: css("--surface"), borderWidth: 2, borderRadius: 5 },
+      label: { show: false }, labelLine: { show: false },
+      emphasis: { scaleSize: 5, itemStyle: { shadowBlur: 12, shadowColor: "#14213d20" } },
     }],
-  }).on("click", (p) => {
-    const code = p.data?.code;
-    if (!code || !/^\d+$/.test(code)) return (pick.textContent = "");
-    if (code.length === 6) return (location.hash = `#/product/${code}?year=${tree.year}`);
-    pick.innerHTML = `<a href="#/product/${code}?year=${tree.year}">${t("Where {reporter} gets {name}", { reporter, name: esc(p.data.name) })} →</a>`;
   });
+  const open = (i) => {
+    const item = path.at(-1).children[i];
+    if (!item.children.length) return (location.hash = `#/product/${item.code}?year=${tree.year}`);
+    path.push(item);
+    draw();
+  };
+  const draw = () => {
+    const current = path.at(-1);
+    back.disabled = path.length === 1;
+    heading.textContent = path.map((n) => n.code ?? n.name).join(" / ");
+    heading.title = current.name;
+    pick.innerHTML = /^\d{2}(\d{2})?$/.test(current.code ?? "")
+      ? `<a href="#/product/${current.code}?year=${tree.year}">${t("Where {reporter} gets {name}", { reporter, name: esc(current.name) })} →</a>` : "";
+    plot.setOption({
+      title: {
+        text: usd(current.valueUsd), subtext: path.length === 1 ? t("All imports") : `${t("HS")} ${current.code}`,
+        left: "center", top: "40%", itemGap: 8,
+        textStyle: { fontSize: 28, fontWeight: 500, color: css("--ink"), fontFamily: css("--font") },
+        subtextStyle: { fontSize: 12, color: css("--muted"), fontFamily: css("--font") },
+      },
+      series: [{ data: current.children.map((n, i) => ({ name: n.name, code: n.code, value: n.valueUsd, itemStyle: { color: colors[i % colors.length] } })) }],
+    });
+    list.replaceChildren(html(current.children.map((n, i) => `<button type="button" class="category-row" data-index="${i}" title="${esc(n.code)} ${esc(n.name)}">
+      <span class="category-swatch" style="background:${colors[i % colors.length]}"></span>
+      <span class="category-name"><span class="code">${esc(n.code)}</span> ${esc(n.name)}</span>
+      <span class="category-value">${usd(n.valueUsd)}<small>${pct(current.valueUsd ? n.valueUsd / current.valueUsd : 0)}</small></span>
+      <span class="category-arrow" aria-hidden="true">›</span></button>`).join("")));
+    list.scrollTop = 0;
+  };
+  list.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-index]");
+    if (row) open(Number(row.dataset.index));
+  });
+  const highlight = (event) => {
+    const row = event.target.closest("[data-index]");
+    plot.dispatchAction({ type: "downplay", seriesIndex: 0 });
+    if (row) plot.dispatchAction({ type: "highlight", seriesIndex: 0, dataIndex: Number(row.dataset.index) });
+  };
+  list.addEventListener("mouseover", highlight);
+  list.addEventListener("focusin", highlight);
+  list.addEventListener("mouseleave", () => plot.dispatchAction({ type: "downplay", seriesIndex: 0 }));
+  list.addEventListener("focusout", () => plot.dispatchAction({ type: "downplay", seriesIndex: 0 }));
+  back.addEventListener("click", () => {
+    if (path.length > 1) path.pop();
+    draw();
+  });
+  plot.on("click", (p) => Number.isInteger(p.dataIndex) && open(p.dataIndex));
+  draw();
 }
 
 export default async function overview(root, _, params) {
@@ -76,8 +112,10 @@ export default async function overview(root, _, params) {
     </div>
     ${state.snapshot.categories ? `<div class="panel" id="categories">
       <h2>${t("What {reporter} imports, from sections to products, {year}", { reporter, year: data.year })} ${storeTag("MongoDB documents")}</h2>
-      <p>${t("Every import of {reporter} in {year}, every value included, grouped by the Harmonized System from its 21 sections down to chapters, headings and products. Click a ring to open it and the centre to step back.", { reporter, year: data.year })}</p>
-      <div class="chart square" id="sunburst"></div><p id="category-pick"></p></div>` : ""}
+      <p>${t("Every import of {reporter} in {year}, grouped by HS section. Select a slice or a row to explore chapters, headings and products. Shares in the list refer to the current group.", { reporter, year: data.year })}</p>
+      <div class="category-nav"><button type="button" id="category-back" disabled>← ${t("Back")}</button><span id="category-current" aria-live="polite"></span></div>
+      <div class="import-mix"><div class="chart" id="import-donut"></div><div class="category-list" id="category-list" aria-label="${t("Import categories")}"></div></div>
+      <p id="category-pick"></p></div>` : ""}
     <div class="panel">
       <h2>${t("Choice or structure?")}</h2>
       <p>${t("Supplier concentration of {reporter} against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.", { reporter, year: data.year })}</p>
@@ -123,6 +161,8 @@ export default async function overview(root, _, params) {
 
   const maxTotal = Math.max(...rows.map((r) => r.total), 1);
   const quadrant = chart(root.querySelector("#quadrant"), {
+    media: [{ query: { maxWidth: 360 }, option: { series: [{ markArea: { label: { show: false } } }] } },
+      { option: { series: [{ markArea: { label: { show: true } } }] } }],
     grid: { left: 60, right: 30, top: 30, bottom: 55 },
     tooltip: {
       formatter: ({ data: [x, y, , r] }) => `<b>${esc(r.code)}</b> ${esc(r.description)}<br>
@@ -146,10 +186,10 @@ export default async function overview(root, _, params) {
       markArea: {
         silent: true,
         itemStyle: { color: "transparent" },
-        label: { color: css("--muted"), fontSize: 12 },
+        label: { color: css("--muted"), fontSize: 11, overflow: "break", lineHeight: 16 },
         data: [
-          [{ name: t("Few suppliers, open world market"), coord: [0, 1], label: { position: "insideTopLeft" } }, { coord: [HIGH, HIGH] }],
-          [{ name: t("Few suppliers, few exporters"), coord: [HIGH, 1], label: { position: "insideTopRight" } }, { coord: [1, HIGH] }],
+          [{ name: t("Few suppliers, open world market"), coord: [0, 1], label: { position: "insideTopLeft", width: 100 } }, { coord: [HIGH, HIGH] }],
+          [{ name: t("Few suppliers, few exporters"), coord: [HIGH, 1], label: { position: "insideTopRight", width: 120 } }, { coord: [1, HIGH] }],
         ],
       },
     }],

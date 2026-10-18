@@ -29,6 +29,7 @@ export default async function country(root, [code], params) {
 
   root.append(html(`
     <div class="head">
+      <a class="back-link" href="#/country">← ${t("All partner countries")}</a>
       <h1><span class="code">${esc(data.country.isoCode)}</span> ${esc(name)}</h1>
       <p class="lede">${t("Everything {reporter} imported from {name}, product by product. Share and rank are measured among each product's suppliers.", { name: esc(name), reporter })}</p>
       ${data.route ? `<p class="lede">${esc(t("Modelled sea route to {reporter}: {route}, {via}.", {
