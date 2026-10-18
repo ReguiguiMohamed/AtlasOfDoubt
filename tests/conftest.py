@@ -4,8 +4,9 @@ import zipfile
 
 import pytest
 
-# Both are read when atlas is imported, so they are set first.
+# These are read when atlas is imported, so they are set first.
 os.environ["ATLAS_DB"] = "atlas_test"
+os.environ["ATLAS_WARM"] = "0"
 os.environ["ATLAS_DATA"] = tempfile.mkdtemp(prefix="atlas-test-")
 
 from atlas.db import connect

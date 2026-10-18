@@ -10,7 +10,9 @@ by the browser are never used.
 
 import csv
 import io
+import os
 import re
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -31,9 +33,22 @@ from atlas.prepare import DATA
 CODE_PATTERN = r"^\d{2}(\d{2}){0,2}$"
 
 
+def warm(db):
+    """Open the newest snapshot's Milvus twins and Ladybug graph, which otherwise cost the first visitor about 2 s."""
+    snapshot = db.snapshots.find_one({"status": "ready"}, sort=[("preparedAt", -1)])
+    for part, opened in (("twins", twins.opened), ("graph", graph.opened)):
+        if snapshot and snapshot.get(part):
+            path = DATA / snapshot["storage"]["path"] / snapshot[part]["path"]
+            if path.exists():
+                opened(path)
+
+
 @asynccontextmanager
 async def lifespan(app):
     client, app.state.db = connect()
+    # Tests prepare and delete snapshots under the warm thread's feet, so they turn it off.
+    if os.environ.get("ATLAS_WARM", "1") == "1":
+        threading.Thread(target=warm, args=(app.state.db,), daemon=True).start()
     yield
     client.close()
 
