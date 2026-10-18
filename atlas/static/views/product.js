@@ -91,16 +91,21 @@ function tariffWall(panel, data, reporter, profile) {
     kpi(t("Tariff of {reporter}", { reporter }), own ? rateText(own) : t("n/a"), own ? `${esc(own.schedule)} ${own.year}` : t("no TRAINS schedule")),
     kpi(t("Median market"), pct(values[Math.floor(values.length / 2)] / 100)),
     kpi(t("Duty free"), t("{count} of {total} markets", { count: values.filter((v) => v === 0).length, total: markets.length })),
+    kpi(t("Under a preference"), t("{count} of {total} markets", { count: markets.filter((m) => m.preference).length, total: markets.length })),
     kpi(t("Highest"), rateText(highest), esc(highest.countryName)),
     kpi(t("Markets {reporter} sells to", { reporter }), t("{count} of {total} markets", { count: sold.length, total: markets.length }), sold.length ? t("{value} in {year}", { value: usd(soldUsd), year: data.exportYear }) : ""),
     kpi(t("Of its sales, duty free"), sold.length ? pct(freeUsd / soldUsd) : t("n/a")),
   ].join("");
-  const tip = (m) => `<b>${esc(m.countryName)}</b>: ${rateText(m)}<br>${esc(m.schedule)} ${m.year}`
+  const tip = (m) => `<b>${esc(m.countryName)}</b>: ${rateText(m)}<br>${esc(m.schedule)} ${m.mfn.year}`
+    + (m.preference ? `<br>${t("{agreement}, against {rate} most-favoured-nation", { agreement: esc(t(m.preference.name)), rate: rateText(m.mfn) })}` : "")
+    + (m.prefLines ? `<br>${t("The preference covers {count} of {total} national lines", { count: m.prefLines, total: m.nationalLines })}` : "")
     + (m.sourceCodes > 1 ? `, ${t("range over {count} codes", { count: m.sourceCodes })}` : "")
     + (m.naLines ? `<br>${t("{count} of {total} national lines levy a non-ad-valorem duty, left out of the rate", { count: m.naLines, total: m.nationalLines })}` : "")
     + (m.exportsUsd ? `<br>${t("{reporter} sold it {value} in {year}", { reporter, value: usd(m.exportsUsd), year: data.exportYear })}` : "");
-  const mine = (m) => (m.countryCode === data.reporter ? { borderColor: css("--warn"), borderWidth: 2 }
-    : m.exportsUsd ? { borderColor: css("--sold"), borderWidth: 1.6 } : {});
+  const mine = (m) => ({
+    ...(m.preference ? { borderColor: css("--accent"), borderWidth: 1.4, borderType: "dashed" } : {}),
+    ...(m.countryCode === data.reporter ? { borderColor: css("--warn"), borderWidth: 2 } : m.exportsUsd ? { borderColor: css("--sold"), borderWidth: 1.6 } : {}),
+  });
 
   loadWorld()
     .then(() => panel.isConnected && zoomable(chart(panel.querySelector("#tariff-map"), {
@@ -175,6 +180,15 @@ function tariffWall(panel, data, reporter, profile) {
         itemStyle: { color: css("--sold"), borderColor: "#fff", borderWidth: 1, decal: { symbol: "none" } },
         z: 3,
       },
+      {
+        type: "scatter",
+        silent: true,
+        symbol: "rect",
+        symbolSize: [12, 2],
+        data: markets.map((m) => (m.preference ? charged(m.mfn) : "-")),
+        itemStyle: { color: css("--accent"), decal: { symbol: "none" } },
+        z: 4,
+      },
     ],
   }).on("click", (p) => profile(markets[p.dataIndex].countryCode));
 }
@@ -197,7 +211,10 @@ function supplyMap(panel, recorded, current, located, code, own) {
       series: [
         {
           data: [
-            ...rows.map((s) => ({ name: shapeId(s.countryCode), value: s.share, supplier: s })),
+            ...rows.map((s) => ({
+              name: shapeId(s.countryCode), value: s.share, supplier: s,
+              itemStyle: own.charged[s.countryCode] ? { borderColor: css("--accent"), borderWidth: 1.4, borderType: "dashed" } : undefined,
+            })),
             { name: shapeId(reporter.countryCode), itemStyle: { areaColor: css("--warn") }, home: true },
           ],
         },
@@ -211,7 +228,8 @@ function supplyMap(panel, recorded, current, located, code, own) {
     `<b>${esc(s.countryName)}</b>`,
     t("{value}, {share} of the imports of {reporter} in {year}", { value: usd(s.valueUsd), share: pct(s.share), reporter: esc(reporter.countryName), year: shown.year }),
     s.distanceKm != null ? km(s.distanceKm) + (s.contiguous ? `, ${t("Shares a border")}` : "") : "",
-    own.tariff ? t("Tariff of {reporter}: {rate}, the same for every supplier under most-favoured-nation terms", { reporter: esc(reporter.countryName), rate: rateText(own.tariff) }) : "",
+    own.charged[s.countryCode] ? t("Tariff of {reporter} on it: {rate} under {agreement}, against {mfn} most-favoured-nation", { reporter: esc(reporter.countryName), rate: rateText(own.charged[s.countryCode]), agreement: esc(own.charged[s.countryCode].name), mfn: rateText(own.tariff) })
+      : own.tariff ? t("Tariff of {reporter} on it: {rate}, most-favoured-nation", { reporter: esc(reporter.countryName), rate: rateText(own.tariff) }) : "",
     `<i>${t("Click for what it sells here")}</i>`,
   ].filter(Boolean).join("<br>");
   const instance = chart(panel.querySelector("#map"), {
@@ -357,7 +375,7 @@ export default async function product(root, [code], params) {
       <div class="chart map" id="map"></div>
       <div id="supplier-detail"></div></div>
     ${single && state.snapshot.tariffs ? `<div class="panel" id="tariff-panel"><h2>${t("The tariff wall: what each market charges on it")} ${storeTag("MongoDB documents")}</h2>
-      <p>${t("The most-favoured-nation tariff each market applies, from its latest TRAINS schedule. A rate is the simple average of the national lines under this code, so a market can charge more or less on one variety. Where several codes of a newer HS edition meet in this one, the bar floats over their range and no average is made. EU members share one schedule. {reporter} is outlined in red. Click a country for its profile.", { reporter })}
+      <p>${t("The tariff each market charges {reporter}, from its latest TRAINS schedule: the lower of its most-favoured-nation rate and the best preference covering {reporter}. A dashed blue outline marks a preference, and a blue tick on its bar the most-favoured-nation rate it replaces. Members of one customs union, like the EU, charge each other nothing. A rate is the simple average of the national lines under this code, so a market can charge more or less on one variety. Where several codes of a newer HS edition meet in this one, the bar floats over their range and no average is made. {reporter} is outlined in red. Click a country for its profile.", { reporter })}
       ${t("A hatched bar marks a market that also levies duties per kilo or per unit, which the rate leaves out.")}
       ${t("A green dot, sized by value, marks each market {reporter} sold it to in {year}, and the map outlines them in green.", { reporter, year: state.snapshot.years.at(-1) })}</p>
       <div class="kpis"></div>
@@ -386,7 +404,7 @@ export default async function product(root, [code], params) {
       <p>${t("Revealed comparative advantage compares the share of this code in the exports of {reporter} with its share in world exports. Above 1, {reporter} exports relatively more of it than the world does.", { reporter })}</p>
       <div class="chart" id="exports"></div></div>
     ${single && current.exporters.length ? `<div class="panel" id="alternatives"><h2>${t("Who else sells it, {year}", { year: current.year })}</h2>
-      <p>${t("The {count} largest exporters of this product worldwide, against what each sent {reporter}. A large exporter that sends nothing yet, shown in red, is a supplier {reporter} could turn to. Under most-favoured-nation terms {reporter} charges each of them the same tariff, so the filters weigh closeness instead.", { reporter, count: current.exporters.length })}</p>
+      <p>${t("The {count} largest exporters of this product worldwide, against what each sent {reporter}. A large exporter that sends nothing yet, shown in red, is a supplier {reporter} could turn to. The map above outlines in dashed blue the suppliers {reporter} gives a preference, and the others pay its most-favoured-nation tariff.", { reporter, count: current.exporters.length })}</p>
       <form class="controls">
         ${state.snapshot.geography ? `<label>${t("Distance")} <select name="km"><option value="">${t("any")}</option>${[1000, 3000, 6000, 10000].map((k) => `<option value="${k}">${t("under {km}", { km: km(k) })}</option>`).join("")}</select></label>
         <label><input type="checkbox" name="contiguous"> ${t("Shares a border")}</label>
@@ -458,7 +476,7 @@ export default async function product(root, [code], params) {
   suppliers.on("rowClick", (_, row) => profile(row.getData().countryCode));
 
   // The tariff fetch fills this in, and the map's tooltip reads it once it is there.
-  const own = { tariff: null };
+  const own = { tariff: null, charged: {} };
   const where = root.querySelector("#where");
   loadWorld()
     .then(() => where.isConnected && supplyMap(where, recorded, current, located, code, own))
@@ -468,7 +486,8 @@ export default async function product(root, [code], params) {
   if (walled) {
     api(`/products/${code}/tariffs?${scoped()}`)
       .then((rates) => {
-        own.tariff = rates.own;
+        own.tariff = rates.own?.mfn ?? null;
+        own.charged = rates.charged;
         return walled.isConnected && tariffWall(walled, rates, reporter, profile);
       })
       .catch(() => walled.remove());
