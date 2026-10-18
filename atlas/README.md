@@ -143,6 +143,7 @@ spacing, zoom axes, reset and narrow-screen label settings without MongoDB.
 | Each section, chapter and heading of the import tree is the exact sum of its products, and a snapshot without HS names answers 404 | `test_api.py::test_categories_sum_each_level_exactly`, `::test_categories_need_hs_names` |
 | Groups compute shares from summed values | `test_metrics.py::test_group_recomputes_shares_from_summed_values`, `test_api.py::test_history_of_a_group_sums_suppliers_before_shares` |
 | Tonnes are never added across products | `test_api.py::test_country_scenario_ranks_products_and_never_adds_tonnes` |
+| Decimals reach MongoDB as the same Decimal128 bits pymongo writes, and read back unchanged | `test_db.py::test_decimal_codec_matches_pymongo_bit_for_bit` |
 | Codes keep leading zeros, values convert exactly, missing tonnes stay null | `test_prepare.py::test_leading_zeros_survive`, `::test_values_are_converted_from_thousands_of_usd_exactly`, `::test_missing_quantity_stays_missing` |
 | Bad rows go to the error report with their line | `test_prepare.py::test_untrusted_rows_go_to_the_error_report`, `::test_each_broken_row_is_named_with_its_line` |
 | Preparing twice is idempotent, a missing year fails the snapshot | `test_prepare.py::test_preparing_twice_creates_no_duplicates`, `::test_missing_year_fails_the_snapshot` |

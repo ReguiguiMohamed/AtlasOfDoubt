@@ -85,16 +85,16 @@ A new release takes the same one command with its own archive. `pytest -q` runs 
 
 | Check | Result |
 | --- | --- |
-| Tests | 91 passed locally against MongoDB 9.0, and 7 Node frontend tests |
+| Tests | 92 passed locally against MongoDB 9.0, and 7 Node frontend tests |
 | Tariffs, latest WITS schedules | 883,010 HS2012 rows from 170 schedules, covering 196 of BACI's countries |
 | Full release in the stores | 142,112,452 flows for 238 countries, 2012 to 2024: 1,049 MB of Parquet, 408 MB of MongoDB data with 96 MB of indexes, an 89 MB Ladybug graph of 4,555,246 edges, 11 MB of Milvus vectors |
-| First visit to a country, 18 October 2026 | 70 s for Fiji, 90 s for Kenya, 109 s for Brazil, 166 s for the USA |
-| Warm requests, median and 95th percentile | product history 51/67 ms, tariffs 38/52 ms, Milvus twins 274/338 ms, overview 995/1,124 ms, Ladybug network 1.2/1.5 s, country profile 1.4/2.3 s, routes 1.5/3.8 s, exports 3.3/10.7 s |
+| First visit to a country, 18 October 2026 | 40 s for Fiji, 56 s for Brazil, 97 s for the USA, down from 70 s, 109 s and 166 s |
+| Warm requests, median and 95th percentile | product history 40/152 ms, tariffs 45/57 ms, Milvus twins 256/341 ms, overview 413/790 ms, Ladybug network 1.1/1.2 s, country profile 1.0/2.2 s, routes 1.4/3.1 s, exports 2.2/7.5 s |
 | Tunisia, 2024, products over $1M | 1,823, of which 1,090 with HHI at or above 0.25 |
 | Tunisia, concentrated by choice, 2024 | 877 products, $12.42B of $25.03B |
 | Tunisia, wheat 1001, 2024 | $653.7M, 17 suppliers, Russia 45.4%, top 3 79.0%, HHI 0.283 |
 
-Timings ran on one Windows laptop against snapshot `BACI_HS12_V202601@846fbd852981`, 20 warm requests each for the USA, Brazil, Kenya and Fiji. The exports page sends every exported product with its destinations at once, 17.7 MB uncompressed in 11.6 s for the USA against 1.4 MB in 0.9 s for Fiji, which makes up the slow tail. The Tunisia figures come from the earlier Tunisia-only import, measured on the same release with the same `metrics.py`. Storage and build-time estimates for every country are in [architecture-research.md](docs/architecture-research.md).
+Timings ran on one Windows laptop against snapshot `BACI_HS12_V202601@537b2fe453e3`, 5 warm gzip requests per endpoint for each of the USA, Brazil, Kenya and Fiji. First visits gained most from packing Decimal128 values with integer arithmetic, since pymongo converts each of a country's 2.6 million decimals bit by bit in Python. The exports page sends every exported product with its destinations at once, 3.0 MB gzipped in 7.5 s for the USA, which makes up the slow tail. The Tunisia figures come from the earlier Tunisia-only import, measured on the same release with the same `metrics.py`. Storage and build-time estimates for every country are in [architecture-research.md](docs/architecture-research.md).
 
 ## Repository
 
