@@ -127,7 +127,7 @@ reporter.
 
 ## Tests
 
-`pytest -q` runs 91 tests against a local MongoDB on port 27017. CI starts a
+`pytest -q` runs 94 tests against a local MongoDB on port 27017. CI starts a
 MongoDB 9.0 service for them.
 
 `node --test tests/frontend.test.mjs` checks chart tooltip confinement, toolbar
@@ -151,6 +151,7 @@ spacing, zoom axes, reset and narrow-screen label settings without MongoDB.
 | RCA, unit values, PRODY and EXPY | `test_prepare.py::test_exports_carry_rca_unit_value_and_coverage`, `::test_prody_and_expy_use_same_year_income` |
 | One reporter never sees another's flows | `test_api.py::test_each_reporter_sees_only_its_own_flows_whatever_the_visit_order` |
 | Country views survive eviction, failure and an expired lease | `test_api.py::test_an_evicted_view_is_rebuilt_with_the_same_figures`, `::test_a_failed_build_leaves_nothing_readable`, `::test_a_build_whose_lease_expired_is_taken_over` |
+| A restart rebuilds the 3 countries visited last, the latest kept newest | `test_api.py::test_a_restart_rebuilds_the_countries_visited_last_the_latest_last` |
 | Shifts count only products over the minimum value in both years | `test_api.py::test_movers_need_the_minimum_value_in_both_years` |
 | Reports ignore browser numbers and survive a new snapshot | `test_api.py::test_report_ignores_numbers_sent_by_the_browser`, `::test_report_is_unchanged_after_another_snapshot_is_added` |
 | WITS and GeoDist codes, and the EU's shared schedule, reach the right BACI country, and a member's own schedule wins | `test_coverage.py::test_coverage_maps_source_codes_and_eu_schedules_to_baci` |
