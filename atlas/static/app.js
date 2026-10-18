@@ -90,6 +90,8 @@ function showCitation() {
         ...source,
         unit: t(source.valueUnit),
       })) + (geography ? ` ${esc(t("Geography: {name}, {distance}. {citation} Licence: {license}.", { ...geography, distance: t(geography.distance) }))}` : "")
+      + (tariffs ? ` ${esc(t("Tariffs: {attribution}. {disclaimer}", { attribution: t(tariffs.attribution), disclaimer: t(tariffs.disclaimer) }))}` : "")
+      + (categories ? ` ${esc(t("HS names: {name}. Licence: {license}.", categories))}` : "")
     : "";
 }
 

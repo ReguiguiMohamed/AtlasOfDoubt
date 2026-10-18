@@ -136,16 +136,71 @@ def get_snapshot(db: Db, snapshot_id: str):
     return ready_snapshot(db, snapshot_id)
 
 
+def categories_named(db, snapshot_id, q, limit=10):
+    """Chapters and headings whose HS name holds q, the ones it starts first and the broader before the narrower."""
+    pattern = {"$regex": re.escape(q), "$options": "i"}
+    found = db.products.find(
+        {"snapshotId": snapshot_id, "$or": [{"chapterName": pattern}, {"headingName": pattern}]},
+        {"_id": 0, "chapter": 1, "heading": 1, "chapterName": 1, "headingName": 1},
+    )
+    rows = {}
+    for p in found:
+        for code, name, level in ((p["chapter"], p["chapterName"], "chapter"), (p["heading"], p["headingName"], "heading")):
+            if q.lower() in name.lower():
+                rows.setdefault(code, {"productCode": code, "description": name, "heading": p["heading"][: len(code)], "level": level})
+    return sorted(rows.values(), key=lambda r: (not r["description"].lower().startswith(q.lower()), len(r["productCode"]),
+                                                r["productCode"]))[:limit]
+
+
+@app.get("/api/categories")
+def categories(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None):
+    """The reporter's imports as a tree of HS sections, chapters, headings and products, each summed exactly."""
+    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    if not snapshot.get("categories"):
+        raise HTTPException(404, f"{snapshot_id} was prepared without HS names")
+    year = checked_year(snapshot, year)
+    products = {p["productCode"]: p for p in db.products.find({"snapshotId": snapshot_id}, {"_id": 0, "snapshotId": 0})}
+    root = {"children": {}}
+    found = db.country_product_years.find(
+        {"generationId": generation, "year": year, "imports": {"$exists": True}}, {"productCode": 1, "imports.metrics.totalUsd": 1}
+    )
+    for r in found:
+        p, value = products[r["productCode"]], r["imports"]["metrics"]["totalUsd"]
+        # Chapter 99 has no section, so its chapter stands in for one.
+        levels = ((p["section"] or p["chapter"], p["sectionName"] or p["chapterName"]), (p["chapter"], p["chapterName"]),
+                  (p["heading"], p["headingName"]), (p["productCode"], p["description"]))
+        node = root
+        for code, name in levels:
+            node = node["children"].setdefault(code, {"code": code, "name": name, "valueUsd": metrics.ZERO, "children": {}})
+            node["valueUsd"] += value
+
+    def listed(node):
+        return sorted(({**n, "children": listed(n)} for n in node["children"].values()), key=lambda n: -n["valueUsd"])
+
+    tree = listed(root)
+    return {"snapshot": snapshot_id, "reporter": reporter, "year": year, "totalUsd": sum((n["valueUsd"] for n in tree), metrics.ZERO),
+            "sections": tree}
+
+
 @app.get("/api/products")
 def search_products(db: Db, snapshot_id: SnapshotId, q: str = ""):
     ready_snapshot(db, snapshot_id)
     q = q.strip()
     query = {"snapshotId": snapshot_id}
+    fields = {"_id": 0, "snapshotId": 0}
     if q.isdigit():
         query["productCode"] = {"$regex": f"^{q}"}
     elif q:
+        # The text index matches whole stemmed words in any order and ranks them, and the regex keeps a half-typed word matching.
+        score = {"score": {"$meta": "textScore"}}
+        ranked = list(db.products.find({**query, "$text": {"$search": q}}, fields | score).sort(score).limit(50))
+        for p in ranked:
+            del p["score"]
         query["description"] = {"$regex": re.escape(q), "$options": "i"}
-    return list(db.products.find(query, {"_id": 0, "snapshotId": 0}).sort("productCode").limit(50))
+        query["productCode"] = {"$nin": [p["productCode"] for p in ranked]}
+        rest = list(db.products.find(query, fields).sort("productCode").limit(50 - len(ranked)))
+        return categories_named(db, snapshot_id, q) + ranked + rest
+    return list(db.products.find(query, fields).sort("productCode").limit(50))
 
 
 @app.get("/api/overview")
@@ -214,6 +269,9 @@ def movers(
 def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     """The reporter's imports and exports of one product or group, year by year.
 
+    A product's year also lists the world's largest exporters of it other than
+    the reporter, each with its share of world exports.
+
     A group's RCA compares the reporter's summed exports of the group with the
     world's summed exports of it, as for one product.
     """
@@ -265,6 +323,7 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
             "suppliers": metrics.with_shares(suppliers),
             "world": world,
             "exports": exports,
+            "exporters": exporters.get(year, []),
         })
     return {
         "snapshot": snapshot_id, "reporter": reporter, "code": code, "products": products, "years": years,
@@ -272,65 +331,6 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     }
 
 
-@app.get("/api/countries/{country_code}")
-def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None):
-    """What one partner sends the reporter, and what the reporter sends it back.
-
-    Rank is one plus the number of suppliers that sent more, so equal values share a rank.
-    """
-    A product's year also lists the world's largest exporters of it other than
-    the reporter, each with its share of world exports.
-
-    snapshot, home, generation = scope(db, snapshot_id, reporter)
-    year = checked_year(snapshot, year)
-    country = find_country(snapshot, country_code)
-
-    totals = {
-        y["year"]: y for y in db.country_years.find({"snapshotId": snapshot_id, "countryCode": reporter})
-    }
-    own = {"$first": {"$filter": {"input": "$imports.suppliers", "cond": {"$eq": ["$$this.countryCode", country_code]}}}}
-    supplied = db.country_product_years.aggregate([
-        {"$match": {"generationId": generation, "imports.suppliers.countryCode": country_code}},
-        {"$project": {"year": 1, "own": own}},
-        {"$group": {"_id": "$year", "valueUsd": {"$sum": "$own.valueUsd"}, "productCount": {"$sum": 1}}},
-    ])
-    by_year = {r["_id"]: r for r in supplied}
-    years = []
-    for y in snapshot["years"]:
-        row, total = by_year.get(y), totals.get(y)
-        sold = next((d["valueUsd"] for d in total["destinations"] if d["countryCode"] == country_code), None) if total else None
-        years.append({
-            "year": y,
-            "valueUsd": row["valueUsd"] if row else None,
-            "shareOfImports": row["valueUsd"] / total["importsUsd"] if row else None,
-            "productCount": row["productCount"] if row else 0,
-            "exportsUsd": sold,
-            "shareOfExports": sold / total["exportsUsd"] if sold else None,
-        })
-
-    # Ranking inside the database sends one small row per product instead of every supplier list.
-    rows = db.country_product_years.aggregate([
-        {"$match": {"generationId": generation, "year": year, "imports.suppliers.countryCode": country_code}},
-        {"$project": {"productCode": 1, "description": 1, "metrics": "$imports.metrics", "values": "$imports.suppliers.valueUsd", "own": own}},
-        {"$project": {
-            "_id": 0,
-            "productCode": 1,
-            "description": 1,
-            "valueUsd": "$own.valueUsd",
-            "rank": {"$add": [1, {"$size": {"$filter": {"input": "$values", "cond": {"$gt": ["$$this", "$own.valueUsd"]}}}}]},
-            "supplierCount": {"$size": "$values"},
-            "totalUsd": "$metrics.totalUsd",
-            "hhi": "$metrics.hhi",
-        }},
-        {"$sort": {"valueUsd": -1}},
-            "exporters": exporters.get(year, []),
-    ])
-    products = [{**r, "share": r["valueUsd"] / r["totalUsd"]} for r in rows]
-    route = routes.route(home["isoCode"], country["isoCode"])
-    return {
-        "snapshot": snapshot_id, "reporter": home, "year": year, "country": country, "years": years, "products": products,
-        "geography": geography(db, snapshot_id, reporter).get(country_code),
-        "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]}
 @app.get("/api/products/{code}/network")
 def network(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     """The reporter's supplier network for the heading of a 4 or 6 digit code, from the snapshot's Ladybug graph."""
@@ -406,6 +406,61 @@ def tariffs(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     }
 
 
+@app.get("/api/countries/{country_code}")
+def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None):
+    """What one partner sends the reporter, and what the reporter sends it back.
+
+    Rank is one plus the number of suppliers that sent more, so equal values share a rank.
+    """
+    snapshot, home, generation = scope(db, snapshot_id, reporter)
+    year = checked_year(snapshot, year)
+    country = find_country(snapshot, country_code)
+
+    totals = {
+        y["year"]: y for y in db.country_years.find({"snapshotId": snapshot_id, "countryCode": reporter})
+    }
+    own = {"$first": {"$filter": {"input": "$imports.suppliers", "cond": {"$eq": ["$$this.countryCode", country_code]}}}}
+    supplied = db.country_product_years.aggregate([
+        {"$match": {"generationId": generation, "imports.suppliers.countryCode": country_code}},
+        {"$project": {"year": 1, "own": own}},
+        {"$group": {"_id": "$year", "valueUsd": {"$sum": "$own.valueUsd"}, "productCount": {"$sum": 1}}},
+    ])
+    by_year = {r["_id"]: r for r in supplied}
+    years = []
+    for y in snapshot["years"]:
+        row, total = by_year.get(y), totals.get(y)
+        sold = next((d["valueUsd"] for d in total["destinations"] if d["countryCode"] == country_code), None) if total else None
+        years.append({
+            "year": y,
+            "valueUsd": row["valueUsd"] if row else None,
+            "shareOfImports": row["valueUsd"] / total["importsUsd"] if row else None,
+            "productCount": row["productCount"] if row else 0,
+            "exportsUsd": sold,
+            "shareOfExports": sold / total["exportsUsd"] if sold else None,
+        })
+
+    # Ranking inside the database sends one small row per product instead of every supplier list.
+    rows = db.country_product_years.aggregate([
+        {"$match": {"generationId": generation, "year": year, "imports.suppliers.countryCode": country_code}},
+        {"$project": {"productCode": 1, "description": 1, "metrics": "$imports.metrics", "values": "$imports.suppliers.valueUsd", "own": own}},
+        {"$project": {
+            "_id": 0,
+            "productCode": 1,
+            "description": 1,
+            "valueUsd": "$own.valueUsd",
+            "rank": {"$add": [1, {"$size": {"$filter": {"input": "$values", "cond": {"$gt": ["$$this", "$own.valueUsd"]}}}}]},
+            "supplierCount": {"$size": "$values"},
+            "totalUsd": "$metrics.totalUsd",
+            "hhi": "$metrics.hhi",
+        }},
+        {"$sort": {"valueUsd": -1}},
+    ])
+    products = [{**r, "share": r["valueUsd"] / r["totalUsd"]} for r in rows]
+    route = routes.route(home["isoCode"], country["isoCode"])
+    return {
+        "snapshot": snapshot_id, "reporter": home, "year": year, "country": country, "years": years, "products": products,
+        "geography": geography(db, snapshot_id, reporter).get(country_code),
+        "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]}
         if route else None,
     }
 

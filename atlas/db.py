@@ -30,11 +30,12 @@ def connect():
     client = MongoClient(os.environ.get("MONGODB_URI", "mongodb://localhost:27017"))
     db = client.get_database(os.environ.get("ATLAS_DB", "atlas"), codec_options=CODEC_OPTIONS)
     db.products.create_index([("snapshotId", 1), ("productCode", 1)], unique=True)
+    db.products.create_index([("snapshotId", 1), ("description", "text")])
     db.world_product_years.create_index([("snapshotId", 1), ("productCode", 1), ("year", 1)], unique=True)
     db.country_years.create_index([("snapshotId", 1), ("countryCode", 1), ("year", 1)], unique=True)
     db.geo_pairs.create_index([("snapshotId", 1), ("countryCode", 1), ("partnerCode", 1)], unique=True)
-    db.materializations.create_index([("snapshotId", 1), ("countryCode", 1)], unique=True)
     db.tariffs.create_index([("snapshotId", 1), ("productCode", 1), ("schedule", 1)], unique=True)
+    db.materializations.create_index([("snapshotId", 1), ("countryCode", 1)], unique=True)
     cache = db.country_product_years
     cache.create_index([("generationId", 1), ("productCode", 1), ("year", 1)], unique=True)
     cache.create_index([("generationId", 1), ("year", 1), ("imports.metrics.totalUsd", -1), ("productCode", 1)])

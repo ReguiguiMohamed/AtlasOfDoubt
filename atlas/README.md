@@ -9,7 +9,9 @@ process.
 | --- | --- | --- |
 | [`metrics.py`](metrics.py) | preparation and every request | totals, shares, top-3 share, HHI, group merging, RCA, unit values and their quality flags, PRODY, EXPY and the disruption scenario |
 | [`db.py`](db.py) | both | connects with Decimal stored as Decimal128 and creates the indexes |
-| [`prepare.py`](prepare.py) | once per release | checks the 13 annual files in DuckDB, writes flows as Parquet by importer and year, stores world and country-year aggregates and the CEPII GeoDist pairs, writes the error report |
+| [`prepare.py`](prepare.py) | once per release | checks the 13 annual files in DuckDB, writes flows as Parquet by importer and year, stores world and country-year aggregates, the CEPII GeoDist pairs, the tariffs and the HS section, chapter and heading names of each product, builds the trade graph and the trade-twin vectors, writes the error report |
+| [`graph.py`](graph.py) | preparation and the product page | writes the last year's trade as a Ladybug graph, one edge per exporter, importer and HS4 heading, and answers the supplier-network questions with Cypher |
+| [`twins.py`](twins.py) | preparation, the imports and exports pages | writes each country's last-year import and export basket to Milvus Lite as a sparse vector of square-rooted HS6 shares, and ranks every country by inner product, the Bhattacharyya coefficient of the two baskets |
 | [`coverage.py`](coverage.py) | before adding tariffs or geography | matches the WITS/TRAINS schedule list and CEPII GeoDist to BACI's countries and writes `coverage.csv` with each country's tariff years, HS revision and geography |
 | [`tariffs.py`](tariffs.py) | before adding tariffs | downloads each country's latest WITS/TRAINS MFN schedule and the WITS HS concordances, maps every schedule to HS2012 and writes `tariffs.csv` and `tariff-schedules.csv` |
 | [`materialize.py`](materialize.py) | first visit to a country | builds that country's import and export view from its Parquet partition into MongoDB, with the last year's export destinations of each product, under a lease, and evicts the least recently used views |
@@ -35,8 +37,6 @@ That is the whole step. GDP per capita comes from the World Bank file in
 `data/snapshots/wdi-gdp.json`, downloaded on the first run and reused after,
 or from a path given as a second argument. The snapshot id is the archive
 name plus a hash of every input, for example `BACI_HS12_V202601@eadf14964b1c`.
-Work happens in a
-`.partial` folder that is renamed only when every year is written, so an
 Tariffs join when `tariffs.csv` and `tariff-schedules.csv` are in
 `data/snapshots/`, written by `python -m atlas.coverage` and then
 `python -m atlas.tariffs`. A schedule in HS2012 keeps its rates. One in
@@ -49,6 +49,8 @@ Ladybug graph the product page opens read-only, and into `twins.db`, a Milvus
 Lite folder with one collection per flow.
 Each panel names the store it reads. If either file is missing, the API answers
 503 for that panel alone and the page says the store is unavailable.
+Work happens in a
+`.partial` folder that is renamed only when every year is written, so an
 interrupted run leaves nothing a reader can pick. Running it again with the
 same files returns the existing snapshot. A new GDP file or a change to the
 formulas gives a new id beside the old one. Every request names its
@@ -83,8 +85,8 @@ link opens on the same one. Without it the app asks for a country first.
 
 | Route | View |
 | --- | --- |
-| `#/overview?year&minValue` | every product the reporter imported in a year with its concentration, the "Choice or structure?" quadrant of its HHI against the world's and the products whose HHI rose or fell the most since an earlier year |
-| `#/exports?year&minValue` | exports and imports from 2012 to 2024, product and destination HHI, EXPY when GDP was prepared, destinations with their distance, border and language, a bubble chart of each destination's value against its distance with the fitted trend, and each product with its world share, RCA, unit value and quality flags |
+| `#/overview?year&minValue` | every product the reporter imported in a year with its concentration, a sunburst of its imports by HS section, chapter, heading and product that links to where a chapter or heading comes from, the "Choice or structure?" quadrant of its HHI against the world's and the products whose HHI rose or fell the most since an earlier year, and the reporter's import twins on a map and in bars split by the products they share most |
+| `#/exports?year&minValue` | exports and imports from 2012 to 2024, product and destination HHI, EXPY when GDP was prepared, destinations with their distance, border and language, a bubble chart of each destination's value against its distance with the fitted trend, and each product with its world share, RCA, unit value and quality flags, and the reporter's export twins on a map and in bars split by the products they share most |
 | `#/country` and `#/country/{code}?year` | every partner country with a search box, then one partner: its distance in km between the most populated cities, a shared border or official language, whether it is landlocked, its modelled sea route, what it supplied and bought back each year, the products it supplies and its rank among their suppliers |
 | `#/routes?year&code&select` | supplier value summed per sea route and per chokepoint on a map, for all products or one code, with a detail panel for the selected route or strait: trend, countries, the products most exposed and a link to simulate its closure |
 | `#/product/{code}?year` | one product, heading or chapter under its section and chapter names: a world map of its suppliers with animated flows sized by share, a year slider that plays 2012 to 2024 and, on a click, what that supplier sells the reporter inside the code, supplier bars and a table with each supplier's distance, border and language, a bubble chart of supplier value against distance, the import-weighted distance and the share from neighbours by year, imports, exports, RCA and HHI from 2012 to 2024, supplier shares over time, for one product the 25 largest world exporters against what each sent the reporter, with their distance, border and language and filters for each, for one product the MFN tariff of every market on a map and a sorted wall where a range floats from its lowest to its highest rate, a hatched bar marks non-ad-valorem duties and a dot sized by value marks each market the reporter already sells to, for a heading or product the supplier network from the trade graph, and a link to its sea routes |
@@ -122,6 +124,10 @@ MongoDB 9.0 service for them.
 | --- | --- |
 | The blueprint example gives top share 60%, top 3 100%, HHI 0.46 | `test_metrics.py::test_blueprint_example` |
 | Affected value is r × Σ selected, other suppliers unchanged | `test_api.py::test_product_scenario_follows_the_blueprint_rule` |
+| Product search finds words in any order and in their plural, and still matches a half-typed word | `test_api.py::test_product_search_matches_words_in_any_order_and_half_typed_words` |
+| Search puts a named chapter or heading, such as Wheat and meslin, before its products | `test_api.py::test_search_puts_a_named_heading_before_its_products` |
+| HS names reach every product at section, chapter and heading level, a heading the source leaves out takes its first product's description, and the names change the snapshot id | `test_prepare.py::test_categories_name_every_level_and_fall_back_to_the_description`, `::test_hs_names_change_the_snapshot_id_and_join_each_product` |
+| Each section, chapter and heading of the import tree is the exact sum of its products, and a snapshot without HS names answers 404 | `test_api.py::test_categories_sum_each_level_exactly`, `::test_categories_need_hs_names` |
 | Groups compute shares from summed values | `test_metrics.py::test_group_recomputes_shares_from_summed_values`, `test_api.py::test_history_of_a_group_sums_suppliers_before_shares` |
 | Tonnes are never added across products | `test_api.py::test_country_scenario_ranks_products_and_never_adds_tonnes` |
 | Codes keep leading zeros, values convert exactly, missing tonnes stay null | `test_prepare.py::test_leading_zeros_survive`, `::test_values_are_converted_from_thousands_of_usd_exactly`, `::test_missing_quantity_stays_missing` |
@@ -135,4 +141,12 @@ MongoDB 9.0 service for them.
 | Reports ignore browser numbers and survive a new snapshot | `test_api.py::test_report_ignores_numbers_sent_by_the_browser`, `::test_report_is_unchanged_after_another_snapshot_is_added` |
 | WITS and GeoDist codes, and the EU's shared schedule, reach the right BACI country, and a member's own schedule wins | `test_coverage.py::test_coverage_maps_source_codes_and_eu_schedules_to_baci` |
 | GeoDist reaches BACI countries through its older codes, never pairs two countries inside one GeoDist entity, and reaches the partner views | `test_prepare.py::test_geography_maps_aliases_and_skips_pairs_inside_one_entity`, `::test_geography_changes_the_snapshot_id_and_is_stored_per_pair`, `test_api.py::test_partner_views_carry_geodist_distance_border_and_language` |
+| The trade graph holds the last year once per exporter, importer and heading, and its value equals the world total | `test_prepare.py::test_graph_holds_the_last_year_once_per_exporter_importer_and_heading` |
+| The supplier network finds the reporter's suppliers, markets sharing them, exporters not yet selling to it and two-step paths | `test_api.py::test_network_finds_shared_suppliers_other_exporters_and_two_step_paths` |
+| A missing Ladybug graph or Milvus twins file answers 503 for its own panel while the MongoDB views keep answering | `test_api.py::test_a_missing_graph_or_twins_fails_only_its_own_panel` |
+| Trade twins store one vector per trading country and flow, score an identical mix 1 and no shared product 0, and name the products behind each score | `test_api.py::test_twins_rank_countries_by_basket_overlap_and_name_what_they_share` |
+| A tariff schedule keeps MFN rates as exact text and leaves out a line with no rate instead of reading it as zero, and several HS2017 codes in one HS2012 code keep a range, never an average | `test_tariffs.py::test_schedule_keeps_mfn_rates_as_exact_strings_and_leaves_out_a_missing_rate`, `::test_several_hs2017_codes_keep_a_range_and_never_an_average`, `::test_older_schedules_take_the_one_code_hs2012_maps_to` |
+| Every market gets its own schedule's rate and the reporter's last-year sales to it, ranges stay ranges, and tariffs change the snapshot id | `test_api.py::test_tariffs_give_every_market_its_schedules_rate_and_keep_ranges` |
+| A product's world exporters leave the reporter out and keep their share of world exports | `test_api.py::test_history_lists_world_exporters_without_the_reporter` |
+| Country names CEPII encoded twice are repaired, clean names stay | `test_prepare.py::test_names_encoded_twice_are_repaired_and_clean_names_kept` |
 | Route and chokepoint totals are sums of their countries, and routes follow the reporter | `test_api.py::test_routes_sum_countries_into_routes_and_chokepoints`, `::test_routes_follow_the_reporter`, `::test_the_route_depends_on_the_reporter` |

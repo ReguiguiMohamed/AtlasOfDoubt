@@ -5,7 +5,9 @@
 The GDP file defaults to data/snapshots/wdi-gdp.json and the CEPII GeoDist
 files to geo_cepii.dta and dist_cepii.dta beside it. Each is downloaded when
 missing, then kept, so later runs reuse the same files and the same snapshot
-id. Delete one to fetch newer figures.
+id. Delete one to fetch newer figures. The section, chapter and heading names
+come the same way from DataHub's HS 2022 files into hs/. Tariffs join when python -m
+atlas.tariffs has written tariffs.csv and tariff-schedules.csv there.
 
 Each annual CSV is checked in DuckDB. Valid flows are written once as Parquet
 partitioned by importer and year, so one country's imports never need a scan
@@ -19,9 +21,9 @@ the snapshot it already made, and a new GDP file or formula gives a new id.
 import csv
 import hashlib
 import io
+import itertools
 import json
 import os
-import itertools
 import re
 import shutil
 import struct
@@ -50,6 +52,9 @@ GDP_INDICATOR = "NY.GDP.PCAP.PP.KD"
 GDP_URL = f"https://api.worldbank.org/v2/country/all/indicator/{GDP_INDICATOR}?format=json&date=2012:2024&per_page=20000"
 GEO_URL = "https://www.cepii.fr/distance/geo_cepii.dta"
 DIST_URL = "https://www.cepii.fr/distance/dist_cepii.dta"
+HS_URL = "https://raw.githubusercontent.com/datasets/harmonized-system/main/data/"
+TARIFF_ATTRIBUTION = "UNCTAD TRAINS, retrieved through the World Bank's WITS"
+TARIFF_DISCLAIMER = "TRAINS data are provided as is, and the user assumes all risk in their use."
 GEO_CITATION = "Mayer, T. and Zignago, S. (2011). Notes on CEPII's distances measures: the GeoDist Database. CEPII Working Paper, N°2011-25."
 # GeoDist predates the split of Serbia and Montenegro, so both take YUG's geography. BACI files Taiwan as S19.
 GEO_ALIASES = {"PAL": ["PSE"], "ROM": ["ROU"], "TMP": ["TLS"], "TWN": ["S19"], "YUG": ["SRB", "MNE"], "ZAR": ["COD"]}
@@ -135,11 +140,6 @@ def quoted(path):
     return "'" + Path(path).as_posix().replace("'", "''") + "'"
 
 
-def read_dictionary(archive, name, columns):
-    if name not in archive.namelist():
-        raise PrepareFailed(f"{name} is missing from the archive")
-    with archive.open(name) as raw:
-        reader = csv.DictReader(io.TextIOWrapper(raw, "utf-8-sig", newline=""))
 def unmangle(text):
     """CEPII's country list stores some names encoded twice, Côte as CÃ´te. Clean text fails the round trip and stays."""
     try:
@@ -148,6 +148,11 @@ def unmangle(text):
         return text
 
 
+def read_dictionary(archive, name, columns):
+    if name not in archive.namelist():
+        raise PrepareFailed(f"{name} is missing from the archive")
+    with archive.open(name) as raw:
+        reader = csv.DictReader(io.TextIOWrapper(raw, "utf-8-sig", newline=""))
         if not set(columns) <= set(reader.fieldnames or []):
             raise PrepareFailed(f"{name} lacks columns {columns}")
         return [{c: unmangle(row[c].strip()) for c in columns} for row in reader]
@@ -249,6 +254,93 @@ def read_geography(geo_path, dist_path, country_rows):
     return pairs, landlocked, provenance
 
 
+def read_tariffs(rates_path, schedules_path, country_rows):
+    """The schedule each BACI country applies, its provenance, and its rates as docs to stream into MongoDB.
+
+    The rates file holds about 900,000 rows, so docs come from a generator. Rates
+    stay Decimal, and a code several source codes met in has no rate, only its range.
+    """
+    known = {int(r["country_code"]) for r in country_rows}
+    with open(schedules_path, encoding="utf-8") as f:
+        applied = {
+            int(r["countryCode"]): {"schedule": r["schedule"], "year": int(r["year"])}
+            for r in csv.DictReader(f) if int(r["countryCode"]) in known
+        }
+
+    def docs(snapshot_id):
+        with open(rates_path, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                yield {
+                    "snapshotId": snapshot_id, "productCode": r["productCode"], "schedule": r["schedule"],
+                    "year": int(r["year"]), "nomenclature": r["nomenclature"],
+                    **{k: Decimal(r[k]) if r[k] else None for k in ("rate", "minRate", "maxRate")},
+                    **{k: int(r[k]) for k in ("sourceCodes", "nationalLines", "naLines")},
+                }
+
+    provenance = {
+        "name": "WITS/TRAINS MFN applied tariffs",
+        "url": "https://wits.worldbank.org/",
+        "attribution": TARIFF_ATTRIBUTION,
+        "disclaimer": TARIFF_DISCLAIMER,
+        "license": "WITS/TRAINS custom licence, see the World Bank data catalogue",
+        "measure": "simple average of national tariff lines per HS6 code, ad valorem percent",
+        "files": [
+            {"filename": p.name, "sha256": sha256(p), "bytes": p.stat().st_size,
+             "retrievedAt": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc)}
+            for p in map(Path, (rates_path, schedules_path))
+        ],
+        "schedules": len({a["schedule"] for a in applied.values()}),
+        "countries": len(applied),
+    }
+    return docs, applied, provenance
+
+
+def read_categories(hs_path, sections_path, products):
+    """Each product's section, chapter and heading with their names, and their provenance.
+
+    The names are those of the HS 2022 edition. A chapter or heading it no longer
+    has keeps the start of its first BACI description, the text before the colon.
+    """
+    with open(sections_path, encoding="utf-8-sig") as f:
+        sections = {r["section"]: r["name"].strip() for r in csv.DictReader(f)}
+    names, section_of = {}, {}
+    with open(hs_path, encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if r["level"] in ("2", "4"):
+                names[r["hscode"]] = r["description"].strip()
+            if r["level"] == "2":
+                section_of[r["hscode"]] = r["section"]
+    fallback = {}
+    for code, description in sorted(products.items()):
+        for group in (code[:2], code[:4]):
+            fallback.setdefault(group, description.split(":")[0].strip())
+    fields = {}
+    for code in products:
+        # Chapter 99 sits under the source's TOTAL row, which names no section.
+        name = sections.get(section_of.get(code[:2]))
+        fields[code] = {
+            "section": name and section_of[code[:2]],
+            # Section I is the one name the source writes in lower case.
+            "sectionName": name and name[0].upper() + name[1:],
+            "chapterName": names.get(code[:2], fallback[code[:2]]),
+            "headingName": names.get(code[:4], fallback[code[:4]]),
+        }
+    groups = {c for code in products for c in (code[:2], code[:4])}
+    provenance = {
+        "name": "Harmonized System names, HS 2022, from UN Comtrade through DataHub",
+        "url": "https://github.com/datasets/harmonized-system",
+        "license": "ODC Public Domain Dedication and License 1.0",
+        "files": [
+            {"filename": p.name, "sha256": sha256(p), "bytes": p.stat().st_size,
+             "retrievedAt": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc)}
+            for p in map(Path, (hs_path, sections_path))
+        ],
+        "named": len(groups & names.keys()),
+        "fallback": sorted(groups - names.keys()),
+    }
+    return fields, provenance
+
+
 def read_gdp(path, country_rows):
     """WDI GDP per capita as {BACI code: {year: value}}, with its provenance.
 
@@ -332,6 +424,33 @@ def write_year(con, out, year, record):
             raise PrepareFailed(f"{record['name']}: Parquet holds {written}, expected {record['flows']} flows")
 
 
+def write_graph(con, out, scratch, countries, year, total):
+    """Load the year's flows into the Ladybug graph, one edge per exporter, importer and heading, and prove no dollar was lost."""
+    edges = Path(scratch) / "edges.parquet"
+    n = con.execute(
+        "COPY (SELECT CAST(exporter AS BIGINT) AS exporter, CAST(importer AS BIGINT) AS importer, left(product, 4) AS heading,"
+        f" CAST(sum(v) * 1000 AS BIGINT) AS valueUsd FROM flows GROUP BY ALL) TO {quoted(edges)} (FORMAT parquet)"
+    ).fetchone()[0]
+    path = out / "graph.lbug"
+    written = graph.build(path, countries, edges if n else None)
+    if written != (n, total):
+        raise PrepareFailed(f"the graph holds {written}, expected {n} edges worth {total} USD")
+    return {"path": path.name, "year": year, "edges": n, "valueUsd": written[1], "bytes": path.stat().st_size, "sha256": sha256(path)}
+
+
+def write_twins(con, out, year):
+    """Store every country's import and export basket of the year as a Milvus vector, and prove each trading country got one."""
+    side = {"imports": "importer", "exports": "exporter"}
+    baskets = {f: con.execute(f"SELECT {c}, product, CAST(sum(v) AS DOUBLE) FROM flows GROUP BY ALL").fetchall() for f, c in side.items()}
+    path = out / "twins.db"
+    written = twins.build(path, baskets)
+    expected = {f: con.execute(f"SELECT count(DISTINCT {c}) FROM flows WHERE v > 0").fetchone()[0] for f, c in side.items()}
+    if written != expected:
+        raise PrepareFailed(f"the twins hold {written} vectors, expected {expected}")
+    size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    return {"path": path.name, "year": year, "metric": "Bhattacharyya coefficient", "vectors": written, "bytes": size}
+
+
 def summarize_year(con, snapshot_id, year, gdp, common, prody_2012):
     """World product and country-year documents for one year, plus the world export total."""
     world_rows = con.execute(WORLD, [WORLD_TOP]).fetchall()
@@ -390,7 +509,7 @@ def write_manifest(out):
     return {"files": len(files), "bytes": sum(f["bytes"] for f in files), "manifestSha256": sha256(manifest)}
 
 
-def prepare(path, db, gdp_path=None, geo_paths=None):
+def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths=None):
     path = Path(path)
     match = re.fullmatch(r"BACI_(HS\d\d)_V(\d+)\.zip", path.name)
     if not match:
@@ -399,10 +518,13 @@ def prepare(path, db, gdp_path=None, geo_paths=None):
     baci_sha = sha256(path)
     gdp_sha = sha256(gdp_path) if gdp_path else None
     geo_shas = [sha256(p) for p in geo_paths] if geo_paths else None
+    tariff_shas = [sha256(p) for p in tariff_paths] if tariff_paths else None
+    hs_shas = [sha256(p) for p in hs_paths] if hs_paths else None
     inputs = f"{baci_sha} {gdp_sha} {metrics.CALCULATION_VERSION} {LAYOUT_VERSION}"
-    # Appended only when present, so a snapshot prepared without GeoDist keeps its id.
-    if geo_shas:
-        inputs += " " + " ".join(geo_shas)
+    # Appended only when present, so a snapshot prepared without GeoDist, tariffs or HS names keeps its id.
+    for shas in (geo_shas, tariff_shas, hs_shas):
+        if shas:
+            inputs += " " + " ".join(shas)
     snapshot_id = f"{path.stem}@{hashlib.sha256(inputs.encode()).hexdigest()[:12]}"
 
     existing = db.snapshots.find_one({"_id": snapshot_id})
@@ -424,33 +546,6 @@ def prepare(path, db, gdp_path=None, geo_paths=None):
             "valueUnit": "current USD, nominal",
             "quantityUnit": "metric tonnes",
         },
-def write_graph(con, out, scratch, countries, year, total):
-    """Load the year's flows into the Ladybug graph, one edge per exporter, importer and heading, and prove no dollar was lost."""
-    edges = Path(scratch) / "edges.parquet"
-    n = con.execute(
-        "COPY (SELECT CAST(exporter AS BIGINT) AS exporter, CAST(importer AS BIGINT) AS importer, left(product, 4) AS heading,"
-        f" CAST(sum(v) * 1000 AS BIGINT) AS valueUsd FROM flows GROUP BY ALL) TO {quoted(edges)} (FORMAT parquet)"
-    ).fetchone()[0]
-    path = out / "graph.lbug"
-    written = graph.build(path, countries, edges if n else None)
-    if written != (n, total):
-        raise PrepareFailed(f"the graph holds {written}, expected {n} edges worth {total} USD")
-    return {"path": path.name, "year": year, "edges": n, "valueUsd": written[1], "bytes": path.stat().st_size, "sha256": sha256(path)}
-
-
-def write_twins(con, out, year):
-    """Store every country's import and export basket of the year as a Milvus vector, and prove each trading country got one."""
-    side = {"imports": "importer", "exports": "exporter"}
-    baskets = {f: con.execute(f"SELECT {c}, product, CAST(sum(v) AS DOUBLE) FROM flows GROUP BY ALL").fetchall() for f, c in side.items()}
-    path = out / "twins.db"
-    written = twins.build(path, baskets)
-    expected = {f: con.execute(f"SELECT count(DISTINCT {c}) FROM flows WHERE v > 0").fetchone()[0] for f, c in side.items()}
-    if written != expected:
-        raise PrepareFailed(f"the twins hold {written} vectors, expected {expected}")
-    size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
-    return {"path": path.name, "year": year, "metric": "Bhattacharyya coefficient", "vectors": written, "bytes": size}
-
-
         "archive": {
             "filename": path.name,
             "sha256": baci_sha,
@@ -461,6 +556,8 @@ def write_twins(con, out, year):
             "baciSha256": baci_sha,
             "gdpSha256": gdp_sha,
             "geodistSha256": geo_shas,
+            "tariffSha256": tariff_shas,
+            "hsSha256": hs_shas,
             "calculationVersion": metrics.CALCULATION_VERSION,
             "layoutVersion": LAYOUT_VERSION,
         },
@@ -483,6 +580,8 @@ def write_twins(con, out, year):
             products = {r["code"].zfill(6): r["description"] for r in product_rows}
             gdp, gdp_provenance = read_gdp(gdp_path, country_rows) if gdp_path else ({}, None)
             pairs, landlocked, geo_provenance = read_geography(*geo_paths, country_rows) if geo_paths else ({}, {}, None)
+            tariff_docs, applied, tariff_provenance = read_tariffs(*tariff_paths, country_rows) if tariff_paths else (None, {}, None)
+            categories, category_provenance = read_categories(*hs_paths, products) if hs_paths else ({}, None)
             # The fixed-2012 sensitivity uses only countries with income in every year, so coverage cannot move it.
             common = {c for c, by_year in gdp.items() if set(YEARS) <= by_year.keys()}
 
@@ -500,6 +599,11 @@ def write_twins(con, out, year):
                 os.remove(csv_path)
                 write_year(con, out, year, record)
                 world_docs, country_docs, world_totals[str(year)] = summarize_year(con, snapshot_id, year, gdp, common, prody_2012)
+                if year == YEARS[-1]:
+                    trade_graph = write_graph(
+                        con, out, scratch, [int(r["country_code"]) for r in country_rows], year, world_totals[str(year)]
+                    )
+                    trade_twins = write_twins(con, out, year)
                 for collection, docs in ((db.world_product_years, world_docs), (db.country_years, country_docs)):
                     if docs:
                         collection.insert_many(docs, ordered=False)
@@ -508,7 +612,8 @@ def write_twins(con, out, year):
 
             db.products.insert_many(
                 [
-                    {"snapshotId": snapshot_id, "productCode": k, "description": d, "chapter": k[:2], "heading": k[:4]}
+                    {"snapshotId": snapshot_id, "productCode": k, "description": d, "chapter": k[:2], "heading": k[:4],
+                     **categories.get(k, {})}
                     for k, d in sorted(products.items())
                 ],
                 ordered=False,
@@ -518,6 +623,10 @@ def write_twins(con, out, year):
                     [{"snapshotId": snapshot_id, "countryCode": a, "partnerCode": b, **f} for (a, b), f in sorted(pairs.items())],
                     ordered=False,
                 )
+            if tariff_docs:
+                rows = tariff_docs(snapshot_id)
+                while batch := list(itertools.islice(rows, 10_000)):
+                    db.tariffs.insert_many(batch, ordered=False)
         storage = {"path": snapshot_id, **write_manifest(out)}
         shutil.rmtree(final, ignore_errors=True)
         os.replace(out, final)
@@ -532,10 +641,15 @@ def write_twins(con, out, year):
         "preparedAt": datetime.now(timezone.utc),
         "gdp": gdp_provenance,
         "geography": geo_provenance,
+        "tariffs": tariff_provenance,
+        "categories": category_provenance,
+        "graph": trade_graph,
+        "twins": trade_twins,
         "countries": [
             {"countryCode": int(r["country_code"]), "countryName": r["country_name"], "isoCode": r["country_iso3"],
              "iso2": iso2[r["country_code"]]}
             | ({"landlocked": landlocked[int(r["country_code"])]} if int(r["country_code"]) in landlocked else {})
+            | ({"tariffSchedule": applied[int(r["country_code"])]} if int(r["country_code"]) in applied else {})
             for r in sorted(country_rows, key=lambda r: r["country_name"])
         ],
         "worldTotals": world_totals,
@@ -563,17 +677,15 @@ if __name__ == "__main__":
     geo_paths = (DATA / "geo_cepii.dta", DATA / "dist_cepii.dta")
     for url, geo_path in zip((GEO_URL, DIST_URL), geo_paths):
         download(url, geo_path)
+    # Tariffs come from python -m atlas.tariffs, which needs the coverage list first, so they join only once present.
+    tariff_paths = (DATA / "tariffs.csv", DATA / "tariff-schedules.csv")
+    if not all(p.exists() for p in tariff_paths):
+        print("No tariffs.csv yet, preparing without tariffs", flush=True)
+        tariff_paths = None
+    hs_paths = (DATA / "hs" / "harmonized-system.csv", DATA / "hs" / "sections.csv")
+    for hs_path in hs_paths:
+        download(HS_URL + hs_path.name, hs_path)
     client, database = connect()
     with client:
-        result = prepare(sys.argv[1], database, gdp_path, geo_paths)
+        result = prepare(sys.argv[1], database, gdp_path, geo_paths, tariff_paths, hs_paths)
     print(f"{result['_id']} {result['status']}: {result['counts']}, {result['errors']['rejectedRows']} rows rejected")
-                if year == YEARS[-1]:
-                    trade_graph = write_graph(
-                        con, out, scratch, [int(r["country_code"]) for r in country_rows], year, world_totals[str(year)]
-                    )
-                    trade_twins = write_twins(con, out, year)
-            if tariff_docs:
-                rows = tariff_docs(snapshot_id)
-                while batch := list(itertools.islice(rows, 10_000)):
-                    db.tariffs.insert_many(batch, ordered=False)
-            | ({"tariffSchedule": applied[int(r["country_code"])]} if int(r["country_code"]) in applied else {})

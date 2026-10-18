@@ -22,8 +22,14 @@ COUNTRIES = [
 PRODUCTS = [
     ("010121", "Horses: live, pure-bred breeding animals"),
     ("100119", "Wheat: durum wheat, other than seed"),
+    ("100199", "Meslin: other"),
     ("310230", "Fertilizers: ammonium nitrate"),
 ]
+
+
+@pytest.fixture
+def products():
+    return dict(PRODUCTS)
 
 
 @pytest.fixture

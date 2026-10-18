@@ -5,6 +5,42 @@ import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctCo
 const HIGH = 0.25;
 const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 
+// A sunburst of the reporter's imports by HS level. Each section keeps its own hue, and each ring a lighter shade of it.
+async function categories(panel, year) {
+  const tree = await api(`/categories?${scoped({ year })}`).catch(() => null);
+  if (!tree || !panel.isConnected) return panel?.remove();
+  const reporter = esc(state.reporter.countryName);
+  const node = (n) => ({ name: n.name, code: n.code, value: n.valueUsd, children: n.children.length ? n.children.map(node) : undefined });
+  const pick = panel.querySelector("#category-pick");
+  chart(panel.querySelector("#sunburst"), {
+    color: tree.sections.map((_, i) => `hsl(${(i * 137.5) % 360} 55% 48%)`),
+    tooltip: {
+      formatter: (p) => (p.data?.code ? `<b>${esc(p.data.code)}</b> ${esc(p.data.name)}<br>${t("{value}, {share} of the imports of {reporter}", { value: usd(p.value), share: pct(p.value / tree.totalUsd), reporter })}` : ""),
+    },
+    series: [{
+      type: "sunburst",
+      data: tree.sections.map(node),
+      radius: ["10%", "96%"],
+      sort: null,
+      nodeClick: "rootToNode",
+      itemStyle: { borderColor: css("--surface"), borderWidth: 1 },
+      label: { color: "#fff", fontSize: 10, minAngle: 8, overflow: "truncate" },
+      levels: [
+        {},
+        { r0: "10%", r: "34%", label: { rotate: "tangential", width: 90 } },
+        { r0: "34%", r: "60%", label: { width: 110 }, itemStyle: { opacity: 0.85 } },
+        { r0: "60%", r: "80%", label: { show: false }, itemStyle: { opacity: 0.7 } },
+        { r0: "80%", r: "96%", label: { show: false }, itemStyle: { opacity: 0.55 } },
+      ],
+    }],
+  }).on("click", (p) => {
+    const code = p.data?.code;
+    if (!code || !/^\d+$/.test(code)) return (pick.textContent = "");
+    if (code.length === 6) return (location.hash = `#/product/${code}?year=${tree.year}`);
+    pick.innerHTML = `<a href="#/product/${code}?year=${tree.year}">${t("Where {reporter} gets {name}", { reporter, name: esc(p.data.name) })} →</a>`;
+  });
+}
+
 export default async function overview(root, _, params) {
   const minValue = Number(params.get("minValue") ?? 1_000_000);
   const data = await api(`/overview?${scoped({ year: params.get("year"), minValue })}`);
@@ -38,6 +74,10 @@ export default async function overview(root, _, params) {
         <label>${t("Search")} <input name="search" type="search" placeholder="${t("Code or description")}"></label>
       </form>
     </div>
+    ${state.snapshot.categories ? `<div class="panel" id="categories">
+      <h2>${t("What {reporter} imports, from sections to products, {year}", { reporter, year: data.year })} ${storeTag("MongoDB documents")}</h2>
+      <p>${t("Every import of {reporter} in {year}, every value included, grouped by the Harmonized System from its 21 sections down to chapters, headings and products. Click a ring to open it and the centre to step back.", { reporter, year: data.year })}</p>
+      <div class="chart square" id="sunburst"></div><p id="category-pick"></p></div>` : ""}
     <div class="panel">
       <h2>${t("Choice or structure?")}</h2>
       <p>${t("Supplier concentration of {reporter} against the concentration of world exports of the same product, both from BACI {year}. Products high on the left depend on few suppliers although the world market offers many. Products on the right are concentrated because few countries export them at all. Bubble size follows import value.", { reporter, year: data.year })}</p>
@@ -116,7 +156,9 @@ export default async function overview(root, _, params) {
   });
   quadrant.on("click", (p) => (location.hash = `#/product/${p.data[3].code}?year=${data.year}`));
 
+  if (state.snapshot.categories) categories(root.querySelector("#categories"), data.year);
   if (moved) movers(root, moved, params);
+  await twins(root, "imports");
 }
 
 function movers(root, moved, params) {
@@ -150,4 +192,3 @@ function movers(root, moved, params) {
   });
   plot.on("click", (p) => p.data?.row && (location.hash = `#/product/${p.data.row.productCode}?year=${moved.to}`));
 }
-  await twins(root, "imports");

@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, km, kpi, loadWorld, pct, pctColumn, query, reach, scoped, shapeId, state, table, tonsColumn, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, centroid, chart, count, css, doubling, esc, geoColumns, gravity, html, index, km, kpi, loadWorld, pct, pctColumn, query, reach, scoped, shapeId, state, storeTag, table, tonsColumn, unavailable, usd, usdColumn, zoomable } from "../lib.js";
 
 const CASE_STUDIES = [
   ["10", "Cereals (chapter 10)"],
@@ -9,6 +9,296 @@ const CASE_STUDIES = [
 ];
 const BARS = 15;
 const TRACKED = 5;
+const FLOWS = 12;
+const ROLES = [
+  ["{reporter}", "--warn"],
+  ["Supplier", "--accent"],
+  ["Buys from the same suppliers", "--accent-2"],
+  ["Sells elsewhere, not to {reporter}", "--muted"],
+  ["Supplies a supplier", "#b48a2c"],
+];
+
+// A force layout of the graph's answers. A country keeps its first role, so a supplier that also buys from another supplier stays a supplier.
+function network(node, net, reporter, pick) {
+  const nodes = new Map();
+  const add = (code, role, value, tip) => nodes.has(code) || nodes.set(code, { code, role, value, tip });
+  add(net.reporter, 0, 0, reporter);
+  for (const s of net.suppliers) add(s.countryCode, 1, s.valueUsd, t("sells {reporter} {value}", { reporter, value: usd(s.valueUsd) }));
+  for (const p of net.peers) add(p.countryCode, 2, p.valueUsd, t("buys {value} from {count} of the same suppliers", { value: usd(p.valueUsd), count: p.sharedSuppliers }));
+  for (const x of net.alternatives) add(x.countryCode, 3, x.valueUsd, t("sells {value} to {count} markets, none to {reporter}", { reporter, value: usd(x.valueUsd), count: x.markets }));
+  const paths = net.paths.filter((p) => nodes.has(p.via));
+  for (const p of paths) add(p.origin, 4, p.valueUsd, t("sells {value} to a supplier of {reporter}", { reporter, value: usd(p.valueUsd) }));
+  const links = [
+    ...net.suppliers.map((s) => [s.countryCode, net.reporter, s.valueUsd]),
+    ...net.links.map((l) => [l.from, l.to, l.valueUsd]),
+    ...paths.map((p) => [p.origin, p.via, p.valueUsd]),
+  ];
+  const biggest = Math.max(...[...nodes.values()].map((n) => n.value));
+  const widest = Math.max(...links.map(([, , v]) => v));
+  const categories = ROLES.map(([name, color]) => ({ name: t(name, { reporter }), itemStyle: { color: color.startsWith("--") ? css(color) : color } }));
+  chart(node, {
+    legend: { data: categories.map((c) => c.name), textStyle: { color: css("--muted") } },
+    tooltip: {
+      formatter: (p) => (p.dataType === "edge"
+        ? `${esc(net.names[p.data.source])} → ${esc(net.names[p.data.target])}: ${usd(p.data.value)}`
+        : `<b>${esc(p.data.name)}</b>${p.data.code === net.reporter ? "" : ` ${esc(p.data.tip)}`}`),
+    },
+    series: [{
+      type: "graph",
+      layout: "force",
+      top: 40,
+      roam: true,
+      draggable: true,
+      categories,
+      force: { repulsion: 260, edgeLength: [50, 170], gravity: 0.08 },
+      label: { show: true, position: "right", color: css("--ink"), fontSize: 11 },
+      lineStyle: { color: "source", opacity: 0.55, curveness: 0.15 },
+      edgeSymbol: ["none", "arrow"],
+      edgeSymbolSize: 7,
+      emphasis: { focus: "adjacency", lineStyle: { opacity: 0.9 } },
+      data: [...nodes.values()].map((n) => ({
+        id: String(n.code), code: n.code, name: net.names[n.code], value: n.value, tip: n.tip, category: n.role,
+        symbolSize: n.role ? 10 + 34 * Math.sqrt(n.value / biggest) : 46,
+      })),
+      links: links.map(([from, to, value]) => ({ source: String(from), target: String(to), value, lineStyle: { width: 1 + 6 * Math.sqrt(value / widest) } })),
+    }],
+  }).on("click", (p) => p.dataType === "node" && p.data.code !== net.reporter && pick(p.data.code));
+  return nodes.size;
+}
+
+// Bars of markets that also levy per-kilo or per-unit duties, which no percentage can show.
+const HATCH = { symbol: "rect", dashArrayX: [1, 0], dashArrayY: [2, 4], rotation: -Math.PI / 4, color: "rgba(255, 255, 255, 0.55)" };
+
+// A market's rate, or the top of its range where several codes met in one HS2012 code.
+const charged = (m) => m.rate ?? m.maxRate;
+const rateText = (m) => (m.rate != null ? pct(m.rate / 100) : t("{low} to {high}", { low: pct(m.minRate / 100), high: pct(m.maxRate / 100) }));
+
+// Every market's MFN tariff on one product, as a map and as a wall of bars from the highest to duty free.
+function tariffWall(panel, data, reporter, profile) {
+  const markets = data.markets;
+  if (!markets.length) return panel.remove();
+  const values = markets.map(charged).sort((a, b) => a - b);
+  // One prohibitive rate would wash every other colour out, so the scale stops at the 95th percentile.
+  const top = Math.max(values[Math.floor((values.length - 1) * 0.95)], 1);
+  const shade = (v) => echarts.color.lerp(Math.min(v / top, 1), [css("--tariff-soft"), css("--tariff")]);
+  const own = data.own;
+  const highest = markets[0];
+  const sold = markets.filter((m) => m.exportsUsd);
+  const soldUsd = sold.reduce((sum, m) => sum + m.exportsUsd, 0);
+  const freeUsd = sold.filter((m) => charged(m) === 0).reduce((sum, m) => sum + m.exportsUsd, 0);
+  const biggest = Math.max(...sold.map((m) => m.exportsUsd));
+  panel.querySelector(".kpis").innerHTML = [
+    kpi(t("Tariff of {reporter}", { reporter }), own ? rateText(own) : t("n/a"), own ? `${esc(own.schedule)} ${own.year}` : t("no TRAINS schedule")),
+    kpi(t("Median market"), pct(values[Math.floor(values.length / 2)] / 100)),
+    kpi(t("Duty free"), t("{count} of {total} markets", { count: values.filter((v) => v === 0).length, total: markets.length })),
+    kpi(t("Highest"), rateText(highest), esc(highest.countryName)),
+    kpi(t("Markets {reporter} sells to", { reporter }), t("{count} of {total} markets", { count: sold.length, total: markets.length }), sold.length ? t("{value} in {year}", { value: usd(soldUsd), year: data.exportYear }) : ""),
+    kpi(t("Of its sales, duty free"), sold.length ? pct(freeUsd / soldUsd) : t("n/a")),
+  ].join("");
+  const tip = (m) => `<b>${esc(m.countryName)}</b>: ${rateText(m)}<br>${esc(m.schedule)} ${m.year}`
+    + (m.sourceCodes > 1 ? `, ${t("range over {count} codes", { count: m.sourceCodes })}` : "")
+    + (m.naLines ? `<br>${t("{count} of {total} national lines levy a non-ad-valorem duty, left out of the rate", { count: m.naLines, total: m.nationalLines })}` : "")
+    + (m.exportsUsd ? `<br>${t("{reporter} sold it {value} in {year}", { reporter, value: usd(m.exportsUsd), year: data.exportYear })}` : "");
+  const mine = (m) => (m.countryCode === data.reporter ? { borderColor: css("--warn"), borderWidth: 2 }
+    : m.exportsUsd ? { borderColor: css("--sold"), borderWidth: 1.6 } : {});
+
+  loadWorld()
+    .then(() => panel.isConnected && zoomable(chart(panel.querySelector("#tariff-map"), {
+      tooltip: { formatter: (p) => (p.data?.market ? tip(p.data.market) : "") },
+      visualMap: {
+        min: 0,
+        max: top,
+        orient: "horizontal",
+        left: "center",
+        bottom: 0,
+        itemWidth: 10,
+        itemHeight: 120,
+        text: [`${pct(top / 100, 0)}+`, pct(0, 0)],
+        textStyle: { color: css("--muted") },
+        inRange: { color: [css("--tariff-soft"), css("--tariff")] },
+      },
+      series: [{
+        type: "map",
+        map: "world",
+        selectedMode: false,
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 34,
+        itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
+        emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent") } },
+        data: markets.map((m) => ({ name: shapeId(m.countryCode), value: charged(m), market: m, itemStyle: mine(m) })),
+      }],
+    }), "series").on("click", (p) => profile(p.data?.market?.countryCode)))
+    .catch(() => panel.querySelector("#tariff-map").remove());
+
+  // A range floats from its lowest to its highest rate on a transparent base.
+  const base = markets.map((m) => (m.rate != null ? 0 : m.minRate));
+  chart(panel.querySelector("#tariff-wall"), {
+    // ECharts draws a decal only while this is on.
+    aria: { enabled: true, decal: { show: true } },
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+    tooltip: { formatter: (p) => tip(markets[p.dataIndex]) },
+    xAxis: {
+      ...axis(),
+      type: "category",
+      data: markets.map((m) => (m.exportsUsd ? { value: m.isoCode, textStyle: { color: css("--sold"), fontWeight: 600 } } : m.isoCode)),
+      axisLabel: { color: css("--muted"), fontSize: 9, interval: "auto" },
+    },
+    yAxis: { ...axis(), type: "value", axisLabel: { color: css("--muted"), formatter: (v) => pct(v / 100, 0) } },
+    series: [
+      { type: "bar", stack: "rate", silent: true, data: base, itemStyle: { color: "transparent", decal: { symbol: "none" } } },
+      {
+        type: "bar",
+        stack: "rate",
+        barCategoryGap: "15%",
+        data: markets.map((m, i) => ({
+          value: charged(m) - base[i],
+          itemStyle: {
+            ...(m.countryCode === data.reporter ? { color: css("--warn") } : { color: shade(charged(m)), opacity: m.rate != null ? 1 : 0.55 }),
+            decal: m.naLines ? HATCH : { symbol: "none" },
+          },
+        })),
+        markLine: {
+          silent: true,
+          symbol: "none",
+          label: { formatter: t("median"), position: "insideEndTop", color: css("--muted") },
+          lineStyle: { color: css("--muted"), type: "dashed" },
+          data: [{ yAxis: values[Math.floor(values.length / 2)] }],
+        },
+      },
+      {
+        type: "scatter",
+        data: markets.map((m) => (m.exportsUsd ? charged(m) : "-")),
+        symbolSize: (v, p) => 6 + 18 * Math.sqrt(markets[p.dataIndex].exportsUsd / biggest),
+        symbolOffset: [0, -8],
+        itemStyle: { color: css("--sold"), borderColor: "#fff", borderWidth: 1, decal: { symbol: "none" } },
+        z: 3,
+      },
+    ],
+  }).on("click", (p) => profile(markets[p.dataIndex].countryCode));
+}
+
+// The suppliers of each recorded year on one map, shaded by share, with a line flowing from the largest to the reporter.
+function supplyMap(panel, recorded, current, located, code, own) {
+  const reporter = state.reporter;
+  const home = centroid(reporter.countryCode);
+  const label = panel.querySelector(".timeline strong");
+  const slider = panel.querySelector(".timeline input");
+  const play = panel.querySelector(".timeline button");
+  const detail = panel.querySelector("#supplier-detail");
+  const top = Math.max(...recorded.map((y) => y.metrics.topSupplier.share));
+  let shown = current;
+  const frame = (y) => {
+    const rows = located(y);
+    const flows = rows.slice(0, FLOWS).map((s) => ({ s, from: centroid(s.countryCode) })).filter((f) => f.from && home);
+    const widest = Math.max(...flows.map((f) => f.s.valueUsd), 1);
+    return {
+      series: [
+        {
+          data: [
+            ...rows.map((s) => ({ name: shapeId(s.countryCode), value: s.share, supplier: s })),
+            { name: shapeId(reporter.countryCode), itemStyle: { areaColor: css("--warn") }, home: true },
+          ],
+        },
+        {
+          data: flows.map((f) => ({ coords: [f.from, home], supplier: f.s, lineStyle: { width: 1 + 5 * Math.sqrt(f.s.valueUsd / widest) } })),
+        },
+      ],
+    };
+  };
+  const tip = (s) => [
+    `<b>${esc(s.countryName)}</b>`,
+    t("{value}, {share} of the imports of {reporter} in {year}", { value: usd(s.valueUsd), share: pct(s.share), reporter: esc(reporter.countryName), year: shown.year }),
+    s.distanceKm != null ? km(s.distanceKm) + (s.contiguous ? `, ${t("Shares a border")}` : "") : "",
+    own.tariff ? t("Tariff of {reporter}: {rate}, the same for every supplier under most-favoured-nation terms", { reporter: esc(reporter.countryName), rate: rateText(own.tariff) }) : "",
+    `<i>${t("Click for what it sells here")}</i>`,
+  ].filter(Boolean).join("<br>");
+  const instance = chart(panel.querySelector("#map"), {
+    tooltip: { formatter: (p) => (p.data?.supplier ? tip(p.data.supplier) : p.data?.home ? `<b>${esc(reporter.countryName)}</b>` : "") },
+    visualMap: {
+      seriesIndex: 0,
+      min: 0,
+      max: top,
+      orient: "horizontal",
+      left: "center",
+      bottom: 0,
+      itemWidth: 10,
+      itemHeight: 120,
+      text: [pct(top, 0), pct(0, 0)],
+      textStyle: { color: css("--muted") },
+      inRange: { color: [css("--supply-soft"), css("--supply")] },
+    },
+    geo: {
+      map: "world",
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 34,
+      selectedMode: false,
+      itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
+      emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent") } },
+    },
+    series: [
+      { type: "map", geoIndex: 0 },
+      {
+        type: "lines",
+        coordinateSystem: "geo",
+        zlevel: 1,
+        effect: { show: true, period: 5, trailLength: 0.35, symbol: "arrow", symbolSize: 5, color: css("--warn") },
+        lineStyle: { color: css("--supply"), opacity: 0.5, curveness: 0.25 },
+      },
+    ],
+  });
+  zoomable(instance, "geo");
+  const show = (i) => {
+    shown = recorded[i];
+    slider.value = i;
+    label.textContent = shown.year;
+    instance.setOption(frame(shown));
+  };
+  show(recorded.indexOf(current));
+  slider.addEventListener("input", () => show(Number(slider.value)));
+  let timer;
+  const stop = () => {
+    clearInterval(timer);
+    timer = null;
+    play.textContent = "▶";
+  };
+  play.addEventListener("click", () => {
+    if (timer) return stop();
+    play.textContent = "❚❚";
+    if (Number(slider.value) === recorded.length - 1) show(0);
+    timer = setInterval(() => {
+      if (!panel.isConnected) return stop();
+      const next = Number(slider.value) + 1;
+      if (next >= recorded.length) return stop();
+      show(next);
+    }, 900);
+  });
+
+  instance.on("click", async (p) => {
+    const s = p.data?.supplier;
+    if (!s) return;
+    const year = shown.year;
+    detail.textContent = "";
+    const profile = await api(`/countries/${s.countryCode}?${scoped({ year })}`);
+    const rows = profile.products.filter((r) => r.productCode.startsWith(code));
+    detail.innerHTML = `<h3>${t("What {country} sold {reporter} under {code}, {year}", { country: esc(s.countryName), reporter: esc(reporter.countryName), code, year })}</h3>
+      <div></div><p><a href="#/country/${s.countryCode}?year=${year}">${t("Open the profile of {country}", { country: esc(s.countryName) })}</a></p>`;
+    table(detail.querySelector("div"), {
+      data: rows,
+      paginationSize: 8,
+      columns: [
+        { title: t("Code"), field: "productCode", width: 90 },
+        { title: t("Product"), field: "description", tooltip: true },
+        usdColumn(t("Imports"), "valueUsd"),
+        pctColumn(t("Share"), "share"),
+        { title: t("Rank"), field: "rank", hozAlign: "right", sorter: "number", width: 100, formatter: (c) => t("{count} of {total}", { count: c.getValue(), total: c.getData().supplierCount }) },
+      ],
+    }).on("rowClick", (_, row) => (location.hash = `#/product/${row.getData().productCode}?year=${year}`));
+  });
+}
 
 export default async function product(root, [code], params) {
   if (!code) return search(root, params.get("q") ?? "");
@@ -16,9 +306,16 @@ export default async function product(root, [code], params) {
   const reporter = esc(state.reporter.countryName);
   const single = code.length === 6;
   const members = data.products.length;
-  const title = single
-    ? data.products[0].description
-    : `${t(code.length === 2 ? "Chapter" : "Heading")}, ${members === 1 ? t("1 product") : t("{count} products", { count: count(members) })}`;
+  const first = data.products[0];
+  const size = `${t(code.length === 2 ? "Chapter" : "Heading")}, ${members === 1 ? t("1 product") : t("{count} products", { count: count(members) })}`;
+  // Snapshots prepared before HS names joined carry none, so a group falls back to its size.
+  const named = code.length === 2 ? first.chapterName : first.headingName;
+  const title = single ? first.description : named ?? size;
+  const crumbs = first.sectionName ? `<nav class="crumbs">${[
+    `${t("Section {section}", { section: esc(first.section) })} ${esc(first.sectionName)}`,
+    ...(code.length > 2 ? [`<a href="#/product/${first.chapter}">${first.chapter} ${esc(first.chapterName)}</a>`] : []),
+    ...(single ? [`<a href="#/product/${first.heading}">${first.heading} ${esc(first.headingName)}</a>`] : []),
+  ].join(" › ")}</nav>` : "";
   const recorded = data.years.filter((y) => y.metrics);
   if (!recorded.length) {
     root.append(html(`<div class="head"><h1><span class="code">${esc(code)}</span> ${esc(title)}</h1>
@@ -33,8 +330,9 @@ export default async function product(root, [code], params) {
 
   root.append(html(`
     <div class="head">
+      ${crumbs}
       <h1><span class="code">${esc(code)}</span> ${esc(title)}</h1>
-      <p class="lede">${t(single ? "HS6 product {code}, in heading {heading} of chapter {chapter}." : "Every HS6 product whose code starts with {code}. Supplier values are summed across the group before shares and the HHI are computed.", { code, heading: code.slice(0, 4), chapter: code.slice(0, 2) })}
+      <p class="lede">${single || !named ? "" : `${esc(size)}. `}${t(single ? "HS6 product {code}, in heading {heading} of chapter {chapter}." : "Every HS6 product whose code starts with {code}. Supplier values are summed across the group before shares and the HHI are computed.", { code, heading: code.slice(0, 4), chapter: code.slice(0, 2) })}
         ${t("Gaps in the trend are years with no recorded flow into {reporter}.", { reporter })}</p>
       <form class="controls">
         <label>${t("Year")} <select name="year">${recorded
@@ -52,9 +350,19 @@ export default async function product(root, [code], params) {
       ${current.world ? kpi(t("World exporter HHI"), index(current.world.hhi), t("{name} leads world exports", { name: current.world.topSupplier?.countryName })) : ""}
       ${far ? kpi(t("Average distance"), km(far.km), t("{share} from neighbours", { share: pct(far.neighbours) })) : ""}
     </div>
-    <div class="panel" id="where"><h2>${t("Where the supply comes from, {year}", { year: current.year })}</h2>
-      <p>${t("Shaded by share of the imports of {reporter}, with {reporter} in red. Very small countries do not show at this scale and are listed in the table.", { reporter })}</p>
-      <div class="chart map" id="map"></div></div>
+    <div class="panel" id="where"><h2>${t("Where the supply comes from")} ${storeTag("MongoDB documents")}</h2>
+      <p>${t("Shaded by share of the imports of {reporter}, with {reporter} in red, and a line flows to it from each of the {count} largest suppliers. Play the years or drag the slider, hover a country for its figures and click one for what it sells {reporter} here. Very small countries do not show at this scale and are listed in the table.", { reporter, count: FLOWS })}</p>
+      <div class="controls timeline"><button type="button" aria-label="${t("Play the years")}">▶</button>
+        <input type="range" min="0" max="${recorded.length - 1}" value="${recorded.indexOf(current)}" aria-label="${t("Year")}"><strong></strong></div>
+      <div class="chart map" id="map"></div>
+      <div id="supplier-detail"></div></div>
+    ${single && state.snapshot.tariffs ? `<div class="panel" id="tariff-panel"><h2>${t("The tariff wall: what each market charges on it")} ${storeTag("MongoDB documents")}</h2>
+      <p>${t("The most-favoured-nation tariff each market applies, from its latest TRAINS schedule. A rate is the simple average of the national lines under this code, so a market can charge more or less on one variety. Where several codes of a newer HS edition meet in this one, the bar floats over their range and no average is made. EU members share one schedule. {reporter} is outlined in red. Click a country for its profile.", { reporter })}
+      ${t("A hatched bar marks a market that also levies duties per kilo or per unit, which the rate leaves out.")}
+      ${t("A green dot, sized by value, marks each market {reporter} sold it to in {year}, and the map outlines them in green.", { reporter, year: state.snapshot.years.at(-1) })}</p>
+      <div class="kpis"></div>
+      <div class="chart map" id="tariff-map"></div>
+      <div class="chart" id="tariff-wall"></div></div>` : ""}
     <div class="grid">
       <div class="panel"><h2>${t("Suppliers in {year}", { year: current.year })}</h2><div class="chart tall" id="bars"></div></div>
       <div class="panel"><h2>${t("Supplier table")}</h2><div id="suppliers"></div></div>
@@ -67,6 +375,10 @@ export default async function product(root, [code], params) {
         <p>${t("The import-weighted distance between the most populated cities, and the share bought from countries across a land border.")}</p>
         <div class="chart tall" id="travel"></div></div>
     </div>` : ""}
+    ${state.snapshot.graph && code.length >= 4 ? `<div class="panel" id="network-panel" style="margin-top:1.25rem">
+      <h2>${t("Supplier network of heading {heading}, {year}", { heading: code.slice(0, 4), year: state.snapshot.graph.year })} ${storeTag("Ladybug graph")}</h2>
+      <p>${t("From the Ladybug trade graph: {reporter} in red, its largest suppliers, the markets buying from the same suppliers, exporters that sell this heading elsewhere but not to {reporter}, and the countries supplying its suppliers. Arrows follow the goods. A two-step link is trade between partners, not a proven supply chain. Drag, zoom and click a country.", { reporter })}</p>
+      <div class="chart tall" id="network"></div></div>` : ""}
     <div class="panel" style="margin-top:1.25rem"><h2>${t("Imports and concentration, {from} to {to}", { from: data.years[0].year, to: data.years.at(-1).year })}</h2>
       <div class="chart" id="trend"></div></div>
     <div class="panel"><h2>${t("Shares of the five largest suppliers over time")}</h2><div class="chart" id="shares"></div></div>
@@ -145,39 +457,29 @@ export default async function product(root, [code], params) {
   });
   suppliers.on("rowClick", (_, row) => profile(row.getData().countryCode));
 
+  // The tariff fetch fills this in, and the map's tooltip reads it once it is there.
+  const own = { tariff: null };
   const where = root.querySelector("#where");
   loadWorld()
-    .then(() => where.isConnected && zoomable(chart(where.querySelector("#map"), {
-      tooltip: { formatter: (p) => (p.data?.supplier ? `${esc(p.data.supplier.countryName)}: ${usd(p.data.supplier.valueUsd)} (${pct(p.data.supplier.share)})` : "") },
-      visualMap: {
-        min: 0,
-        max: ranked[0].share,
-        orient: "horizontal",
-        left: "center",
-        bottom: 0,
-        itemWidth: 10,
-        itemHeight: 120,
-        text: [pct(ranked[0].share, 0), pct(0, 0)],
-        textStyle: { color: css("--muted") },
-        inRange: { color: [css("--supply-soft"), css("--supply")] },
-      },
-      series: [{
-        type: "map",
-        map: "world",
-        selectedMode: false,
-        left: 0,
-        right: 0,
-        top: 0,
-        bottom: 34,
-        itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
-        emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent") } },
-        data: [
-          ...ranked.map((s) => ({ name: shapeId(s.countryCode), value: s.share, supplier: s })),
-          { name: shapeId(state.reporter.countryCode), itemStyle: { areaColor: css("--warn") }, emphasis: { disabled: true } },
-        ],
-      }],
-    }), "series").on("click", (p) => profile(p.data?.supplier?.countryCode)))
+    .then(() => where.isConnected && supplyMap(where, recorded, current, located, code, own))
     .catch(() => where.remove());
+
+  const walled = root.querySelector("#tariff-panel");
+  if (walled) {
+    api(`/products/${code}/tariffs?${scoped()}`)
+      .then((rates) => {
+        own.tariff = rates.own;
+        return walled.isConnected && tariffWall(walled, rates, reporter, profile);
+      })
+      .catch(() => walled.remove());
+  }
+
+  const graphed = root.querySelector("#network-panel");
+  if (graphed) {
+    api(`/products/${code}/network?${scoped()}`)
+      .then((net) => graphed.isConnected && network(graphed.querySelector("#network"), net, state.reporter.countryName, profile) < 2 && graphed.remove())
+      .catch((e) => (e.status === 503 ? graphed.querySelector("#network").replaceWith(html(unavailable("Ladybug graph")).firstElementChild) : graphed.remove()));
+  }
 
   const years = data.years.map((y) => String(y.year));
   chart(root.querySelector("#trend"), {
@@ -240,11 +542,27 @@ export default async function product(root, [code], params) {
       rowFormatter: (row) => row.getData().reporter === 0 && row.getElement().classList.add("untapped"),
       columns: [
         { title: t("Country"), field: "countryName", minWidth: 140 },
+        usdColumn(t("World exports"), "valueUsd"),
         pctColumn(t("Share of world exports"), "share"),
         pctColumn(t("Share of imports"), "reporter"),
+        ...geoColumns(),
       ],
     });
     exporters.on("rowClick", (_, row) => profile(row.getData().countryCode));
+    const form = alternatives.querySelector("form");
+    const narrow = () => {
+      const f = Object.fromEntries(new FormData(form));
+      const keep = (r) => (!f.km || (r.distanceKm != null && r.distanceKm < Number(f.km)))
+        && (!f.contiguous || r.contiguous) && (!f.commonLanguage || r.commonLanguage) && (!f.untapped || r.reporter === 0);
+      exporters.setFilter(keep);
+      const shown = rows.filter(keep);
+      alternatives.querySelector("#alternatives-count").textContent = t("{shown} of {total} exporters, {untapped} not yet supplying {reporter}", {
+        shown: shown.length, total: rows.length, untapped: shown.filter((r) => r.reporter === 0).length, reporter: state.reporter.countryName,
+      });
+    };
+    form.addEventListener("change", narrow);
+    form.addEventListener("submit", (e) => e.preventDefault());
+    exporters.on("tableBuilt", narrow);
   }
 
   if (!single) {
@@ -278,7 +596,11 @@ async function search(root, q) {
     placeholder: t("Type at least two characters"),
     columns: [
       { title: t("Code"), field: "productCode", width: 90 },
-      { title: t("Product"), field: "description", tooltip: true },
+      // A chapter or heading whose HS name matched comes first.
+      { title: t("Product"), field: "description", tooltip: true, formatter: (c) => {
+        const r = c.getData();
+        return r.level ? `<strong>${esc(r.description)}</strong> <span class="muted">${t(r.level === "chapter" ? "Chapter" : "Heading")}</span>` : esc(r.description);
+      } },
       { title: t("Heading"), field: "heading", width: 110 },
     ],
   });
@@ -299,40 +621,3 @@ async function search(root, q) {
   });
   if (q) run();
 }
-    ${state.snapshot.graph && code.length >= 4 ? `<div class="panel" id="network-panel" style="margin-top:1.25rem">
-      <h2>${t("Supplier network of heading {heading}, {year}", { heading: code.slice(0, 4), year: state.snapshot.graph.year })} ${storeTag("Ladybug graph")}</h2>
-      <p>${t("From the Ladybug trade graph: {reporter} in red, its largest suppliers, the markets buying from the same suppliers, exporters that sell this heading elsewhere but not to {reporter}, and the countries supplying its suppliers. Arrows follow the goods. A two-step link is trade between partners, not a proven supply chain. Drag, zoom and click a country.", { reporter })}</p>
-      <div class="chart tall" id="network"></div></div>` : ""}
-  const walled = root.querySelector("#tariff-panel");
-  if (walled) {
-    api(`/products/${code}/tariffs?${scoped()}`)
-      .then((rates) => {
-        own.tariff = rates.own;
-        return walled.isConnected && tariffWall(walled, rates, reporter, profile);
-      })
-      .catch(() => walled.remove());
-  }
-
-  const graphed = root.querySelector("#network-panel");
-  if (graphed) {
-    api(`/products/${code}/network?${scoped()}`)
-      .then((net) => graphed.isConnected && network(graphed.querySelector("#network"), net, state.reporter.countryName, profile) < 2 && graphed.remove())
-      .catch((e) => (e.status === 503 ? graphed.querySelector("#network").replaceWith(html(unavailable("Ladybug graph")).firstElementChild) : graphed.remove()));
-  }
-
-        usdColumn(t("World exports"), "valueUsd"),
-        ...geoColumns(),
-    const form = alternatives.querySelector("form");
-    const narrow = () => {
-      const f = Object.fromEntries(new FormData(form));
-      const keep = (r) => (!f.km || (r.distanceKm != null && r.distanceKm < Number(f.km)))
-        && (!f.contiguous || r.contiguous) && (!f.commonLanguage || r.commonLanguage) && (!f.untapped || r.reporter === 0);
-      exporters.setFilter(keep);
-      const shown = rows.filter(keep);
-      alternatives.querySelector("#alternatives-count").textContent = t("{shown} of {total} exporters, {untapped} not yet supplying {reporter}", {
-        shown: shown.length, total: rows.length, untapped: shown.filter((r) => r.reporter === 0).length, reporter: state.reporter.countryName,
-      });
-    };
-    form.addEventListener("change", narrow);
-    form.addEventListener("submit", (e) => e.preventDefault());
-    exporters.on("tableBuilt", narrow);

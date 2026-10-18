@@ -1,10 +1,12 @@
+import io
 import json
+import zipfile
 from decimal import Decimal
 
 import pytest
 
 from atlas import materialize
-from atlas.prepare import DATA, PrepareFailed, prepare, read_gdp, read_geography
+from atlas.prepare import DATA, PrepareFailed, prepare, read_categories, read_dictionary, read_gdp, read_geography
 from tests.test_coverage import STATA_MISSING, write_dta
 
 FLOWS = {
@@ -22,8 +24,6 @@ FLOWS = {
     ],
     2015: ["2015,251,788,100119,1.5,3"],
 }
-
-
 # In 2024 France and the USA sell Tunisia wheat. Italy buys from both and from China, and France buys from Afghanistan.
 NETWORK = {
     2024: [
@@ -37,6 +37,8 @@ NETWORK = {
         "2024,251,788,310230,9,1",
     ],
 }
+
+
 def cached(db, snapshot, country, code, year):
     generation = materialize.ensure(db, snapshot, country)
     return db.country_product_years.find_one({"generationId": generation, "productCode": code, "year": year})
@@ -54,7 +56,7 @@ def test_preparing_twice_creates_no_duplicates(db, make_archive):
     assert first["_id"].startswith("BACI_HS12_V202601@")
     assert second["status"] == "ready"
     assert db.world_product_years.count_documents({}) == 3
-    assert db.products.count_documents({}) == 3
+    assert db.products.count_documents({}) == 4
     assert db.snapshots.count_documents({}) == 1
 
 
@@ -149,7 +151,7 @@ def test_snapshot_records_provenance_counts_and_files(db, make_archive):
         "flows": 7,
         "roundedValues": 0,
         "unreadableQuantities": 0,
-        "dictionaryProducts": 3,
+        "dictionaryProducts": 4,
         "countries": 6,
     }
     manifest = json.loads((DATA / snapshot["storage"]["path"] / "manifest.json").read_text())
@@ -158,8 +160,6 @@ def test_snapshot_records_provenance_counts_and_files(db, make_archive):
     assert not list(DATA.glob("*.partial"))
 
 
-def test_missing_year_fails_the_snapshot(db, make_archive):
-    with pytest.raises(PrepareFailed, match="Y2020"):
 def test_graph_holds_the_last_year_once_per_exporter_importer_and_heading(db, make_archive):
     snapshot = prepare(make_archive(NETWORK), db)
     assert {k: snapshot["graph"][k] for k in ("path", "year", "edges", "valueUsd")} == {
@@ -169,6 +169,8 @@ def test_graph_holds_the_last_year_once_per_exporter_importer_and_heading(db, ma
     assert (DATA / snapshot["storage"]["path"] / "graph.lbug").stat().st_size == snapshot["graph"]["bytes"]
 
 
+def test_missing_year_fails_the_snapshot(db, make_archive):
+    with pytest.raises(PrepareFailed, match="Y2020"):
         prepare(make_archive(FLOWS, skip_year=2020), db)
     assert db.snapshots.find_one()["status"] == "failed"
     assert not list(DATA.glob("*.partial"))
@@ -266,3 +268,51 @@ def test_geography_changes_the_snapshot_id_and_is_stored_per_pair(db, make_archi
     }
     assert snapshot["geography"]["unmatched"] == [156, 842]
     assert snapshot["manifest"]["geodistSha256"] == [f["sha256"] for f in snapshot["geography"]["files"]]
+
+
+def test_names_encoded_twice_are_repaired_and_clean_names_kept():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("c.csv", "country_name\nCÃ´te d'Ivoire\nTÃ¼rkiye\nCôte d'Ivoire\n\"Korea, Rep.\"\n".encode("utf-8"))
+    with zipfile.ZipFile(buffer) as archive:
+        rows = read_dictionary(archive, "c.csv", ["country_name"])
+    assert [r["country_name"] for r in rows] == ["Côte d'Ivoire", "Türkiye", "Côte d'Ivoire", "Korea, Rep."]
+
+
+def hs_files(tmp_path):
+    """DataHub-shaped HS files with heading 3102 left out, as headings HS 2022 dropped are."""
+    hs, sections = tmp_path / "harmonized-system.csv", tmp_path / "sections.csv"
+    hs.write_text(
+        "section,hscode,description,parent,level\n"
+        'I,01,"Animals; live",TOTAL,2\n'
+        'I,0101,"Live horses, asses, mules and hinnies",01,4\n'
+        'I,010121,"Horses; live, pure-bred breeding animals",0101,6\n'
+        "II,10,Cereals,TOTAL,2\n"
+        "II,1001,Wheat and meslin,10,4\n"
+        "VI,31,Fertilizers,TOTAL,2\n",
+        encoding="utf-8",
+    )
+    # The real file opens with a byte order mark, writes section I in lower case and pads section II.
+    sections.write_text(
+        "﻿section,name\nI,live animals; animal products\nII,Vegetable products \nVI,Products of the chemical or allied industries\n",
+        encoding="utf-8",
+    )
+    return hs, sections
+
+
+def test_categories_name_every_level_and_fall_back_to_the_description(tmp_path, products):
+    fields, provenance = read_categories(*hs_files(tmp_path), products)
+    assert fields["100199"] == {"section": "II", "sectionName": "Vegetable products", "chapterName": "Cereals", "headingName": "Wheat and meslin"}
+    assert fields["010121"]["sectionName"] == "Live animals; animal products"
+    assert fields["310230"]["headingName"] == "Fertilizers"
+    assert (provenance["named"], provenance["fallback"]) == (5, ["3102"])
+
+
+def test_hs_names_change_the_snapshot_id_and_join_each_product(db, make_archive, tmp_path):
+    without = prepare(make_archive(FLOWS), db)
+    snapshot = prepare(make_archive(FLOWS), db, hs_paths=hs_files(tmp_path))
+    assert snapshot["_id"] != without["_id"]
+    assert "chapterName" not in db.products.find_one({"snapshotId": without["_id"]})
+    wheat = db.products.find_one({"snapshotId": snapshot["_id"], "productCode": "100119"}, {"_id": 0, "headingName": 1, "section": 1})
+    assert wheat == {"section": "II", "headingName": "Wheat and meslin"}
+    assert snapshot["manifest"]["hsSha256"] == [f["sha256"] for f in snapshot["categories"]["files"]]

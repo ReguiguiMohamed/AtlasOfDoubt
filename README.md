@@ -12,11 +12,11 @@ A concentrated supplier list is a choice when the world market is open and a con
 
 ## How it works
 
-1. **Prepare.** `python -m atlas.prepare` checks the 13 yearly files of a BACI release in DuckDB, writes the valid flows once as Parquet partitioned by importer and year, and stores world totals, country-year summaries, RCA inputs and PRODY in MongoDB. An optional World Bank GDP file adds PRODY and EXPY, and the CEPII GeoDist files add the distance, a shared border and a common official language for each country pair.
-2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release, GDP or GeoDist file lands beside the old one without changing numbers a report already cites.
+1. **Prepare.** `python -m atlas.prepare` checks the 13 yearly files of a BACI release in DuckDB, writes the valid flows once as Parquet partitioned by importer and year, and stores world totals, country-year summaries, RCA inputs and PRODY in MongoDB. An optional World Bank GDP file adds PRODY and EXPY, and the CEPII GeoDist files add the distance, a shared border and a common official language for each country pair. Each country's latest WITS/TRAINS MFN tariff schedule, mapped to HS2012, goes into MongoDB beside them, with the HS section, chapter and heading name of every product. The last year's flows also go into a Ladybug graph, one edge per exporter, importer and HS4 heading, and into Milvus Lite as one sparse vector per country and flow over its HS6 basket.
+2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release, GDP, GeoDist or tariff file lands beside the old one without changing numbers a report already cites.
 3. **Materialize.** The first visit to a country builds its view from its own Parquet partition into MongoDB, as one generation that becomes readable only when complete. The least recently used countries are evicted past a 1 GB budget and rebuilt with the same figures.
 4. **Measure.** One module, `atlas/metrics.py`, computes totals, shares, HHI, RCA, PRODY, EXPY and the scenario. Preparation, the API and saved reports all call it.
-5. **Explore and stress test.** The web app shows imports, exports, products, partner countries and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
+5. **Explore and stress test.** The web app shows imports, exports, products, partner countries, the tariff each market charges on a product, the supplier network of a heading, each country's trade twins and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ flowchart LR
 
 ## Run it
 
-Both paths need the BACI archive in `data/raw/`. Prepare fetches the World Bank GDP file and the two CEPII GeoDist files on its first run and keeps them in `data/snapshots/`:
+Both paths need the BACI archive in `data/raw/`. Prepare fetches the World Bank GDP file, the two CEPII GeoDist files and the two HS name files on its first run and keeps them in `data/snapshots/`:
 
 ```bash
 curl -L --create-dirs -o data/raw/BACI_HS12_V202601.zip https://www.cepii.fr/DATA_DOWNLOAD/baci/data/BACI_HS12_V202601.zip
@@ -107,7 +107,7 @@ Python 3.12, FastAPI 0.143.3, PyMongo 4.19.0, DuckDB 1.5.6, MongoDB 9.0, Ladybug
 
 ## Data
 
-[CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), HS 2012 nomenclature, release V202601, under the Etalab Open License 2.0. GDP per capita, PPP, constant 2021 dollars, from the [World Bank WDI](https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD) under CC BY 4.0. Distances, borders, languages and landlocked status from [CEPII GeoDist](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=6) under the Etalab Open License 2.0, with the distance taken between the most populated cities (Mayer and Zignago, 2011). The archive and the prepared files stay out of git and out of the image.
+[CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), HS 2012 nomenclature, release V202601, under the Etalab Open License 2.0. GDP per capita, PPP, constant 2021 dollars, from the [World Bank WDI](https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD) under CC BY 4.0. Distances, borders, languages and landlocked status from [CEPII GeoDist](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=6) under the Etalab Open License 2.0, with the distance taken between the most populated cities (Mayer and Zignago, 2011). Import tariffs from UNCTAD TRAINS, retrieved through the World Bank's [WITS](https://wits.worldbank.org), under the WITS/TRAINS licence in the World Bank data catalogue. TRAINS data are provided as is, and the user assumes all risk in their use. HS section, chapter and heading names, in English only, from the [DataHub harmonized-system](https://github.com/datasets/harmonized-system) dataset under the ODC Public Domain Dedication and License 1.0. The archive, the tariff files and the prepared files stay out of git and out of the image.
 
 ## License
 

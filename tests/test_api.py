@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from atlas import materialize, routes
 from atlas.api import app
 from atlas.prepare import prepare
-from tests.test_prepare import FLOWS, fixture_geography
+from tests.test_prepare import FLOWS, NETWORK, fixture_geography, hs_files
 
 TUNISIA, USA, CHINA = 788, 842, 156
 
@@ -45,6 +45,14 @@ def test_product_search_by_code_prefix_and_text(api):
     by_text = api.get("/api/products", params={"q": "AMMONIUM"}).json()
     assert [p["productCode"] for p in by_code] == ["010121"]
     assert [p["productCode"] for p in by_text] == ["310230"]
+
+
+def test_product_search_matches_words_in_any_order_and_half_typed_words(api):
+    search = lambda q: [p["productCode"] for p in api.get("/api/products", params={"q": q}).json()]
+    assert search("nitrates ammonium") == ["310230"]
+    assert search("seed durum") == ["100119"]
+    assert search("fertil") == ["310230"]
+    assert search("Wheat: dur") == ["100119"]
 
 
 def test_overview_defaults_to_latest_year_and_filters_by_value(api):
@@ -85,14 +93,6 @@ def test_history_carries_the_reporters_exports(api):
     assert one[2015]["exports"] is None
 
 
-def test_history_rejects_odd_length_codes(api):
-    assert api.get("/api/products/100/history").status_code == 422
-
-
-def preview(api, **spec):
-    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, **spec}
-    response = api.post("/api/scenarios/preview", json=body)
-    assert response.status_code == 200, response.text
 def test_history_lists_world_exporters_without_the_reporter(api):
     one = {y["year"]: y for y in api.get("/api/products/010121/history").json()["years"]}
     group = {y["year"]: y for y in api.get("/api/products/01/history").json()["years"]}
@@ -101,6 +101,14 @@ def test_history_lists_world_exporters_without_the_reporter(api):
     assert group[2012]["exporters"] == []
 
 
+def test_history_rejects_odd_length_codes(api):
+    assert api.get("/api/products/100/history").status_code == 422
+
+
+def preview(api, **spec):
+    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, **spec}
+    response = api.post("/api/scenarios/preview", json=body)
+    assert response.status_code == 200, response.text
     return response.json()["result"]
 
 
@@ -184,14 +192,6 @@ def test_static_files_are_revalidated(api):
     assert api.get("/app.js").headers["cache-control"] == "no-cache"
 
 
-def test_responses_are_compressed(api):
-    assert api.get("/app.js", headers={"accept-encoding": "gzip"}).headers["content-encoding"] == "gzip"
-
-
-def test_country_profile_sums_supplies_across_products(api):
-    profile = api.get("/api/countries/251", params={"year": 2012}).json()
-    assert profile["country"]["countryName"] == "France"
-    assert [(p["productCode"], p["valueUsd"], p["share"], p["rank"]) for p in profile["products"]] == [
 # Tunisia and France export the same mix. China shares the fertilizer and Italy the wheat, and the USA shares nothing.
 TWINS = {2024: [
     "2024,788,4,100119,64,1", "2024,788,4,310230,36,1",
@@ -216,10 +216,10 @@ def test_twins_rank_countries_by_basket_overlap_and_name_what_they_share(db, mak
     assert france[0]["description"] == "Wheat: durum wheat, other than seed"
 
 
-        ("010121", 60000, 0.6, 1),
-        ("310230", 2734, 1, 1),
-    ]
-    years = {y["year"]: y for y in profile["years"]}
+def test_responses_are_compressed(api):
+    assert api.get("/app.js", headers={"accept-encoding": "gzip"}).headers["content-encoding"] == "gzip"
+
+
 def test_network_finds_shared_suppliers_other_exporters_and_two_step_paths(db, make_archive):
     snapshot = prepare(make_archive(NETWORK), db)["_id"]
     params = {"snapshot": snapshot, "reporter": TUNISIA}
@@ -257,6 +257,14 @@ def test_a_missing_graph_or_twins_fails_only_its_own_panel(db, make_archive):
     assert not (folder / snapshot["twins"]["path"]).exists()
 
 
+def test_country_profile_sums_supplies_across_products(api):
+    profile = api.get("/api/countries/251", params={"year": 2012}).json()
+    assert profile["country"]["countryName"] == "France"
+    assert [(p["productCode"], p["valueUsd"], p["share"], p["rank"]) for p in profile["products"]] == [
+        ("010121", 60000, 0.6, 1),
+        ("310230", 2734, 1, 1),
+    ]
+    years = {y["year"]: y for y in profile["years"]}
     assert years[2012]["valueUsd"] == 62734
     assert years[2012]["shareOfImports"] == pytest.approx(62734 / 102734)
     assert years[2012]["productCount"] == 2
@@ -437,3 +445,75 @@ def test_partner_views_carry_geodist_distance_border_and_language(db, make_archi
     assert usa["geography"] is None
     assert [(d["isoCode"], d["distanceKm"], d["commonLanguage"]) for d in destinations] == [("FRA", 1501, True)]
     assert {k: v["distanceKm"] for k, v in history["geography"].items()} == {"251": 1501, "380": 594}
+
+
+def fixture_tariffs(tmp_path):
+    """France and Italy share an EU schedule, China's rate on durum wheat is a range, and Afghanistan has no schedule."""
+    rates, schedules = tmp_path / "tariffs.csv", tmp_path / "tariff-schedules.csv"
+    rates.write_text(
+        "schedule,year,nomenclature,productCode,rate,minRate,maxRate,sourceCodes,nationalLines,naLines\n"
+        "EUN,2021,H5,100119,12.8,0,25.6,1,2,0\n"
+        "TUN,2019,H5,100119,36,36,36,1,1,0\n"
+        "USA,2021,H5,100119,0,0,0,1,3,0\n"
+        "CHN,2021,H5,100119,,1,65,2,4,1\n"
+        "TUN,2019,H5,010121,0,0,0,1,1,0\n",
+        encoding="utf-8",
+    )
+    schedules.write_text("countryCode,schedule,year\n251,EUN,2021\n380,EUN,2021\n788,TUN,2019\n842,USA,2021\n156,CHN,2021\n", encoding="utf-8")
+    return rates, schedules
+
+
+def test_tariffs_give_every_market_its_schedules_rate_and_keep_ranges(db, make_archive, tmp_path):
+    sold = {2024: ["2024,788,251,100119,4,1", "2024,788,156,100119,6,1", "2024,788,4,100119,1,1"]}
+    archive = make_archive(FLOWS | sold)
+    plain = prepare(archive, db)
+    snapshot = prepare(archive, db, tariff_paths=fixture_tariffs(tmp_path))
+    assert snapshot["_id"] != plain["_id"]
+    countries = {c["isoCode"]: c.get("tariffSchedule") for c in snapshot["countries"]}
+    assert countries["ITA"] == {"schedule": "EUN", "year": 2021} and countries["AFG"] is None
+    with TestClient(app) as client:
+        found = client.get("/api/products/100119/tariffs", params={"snapshot": snapshot["_id"], "reporter": TUNISIA})
+        heading = client.get("/api/products/1001/tariffs", params={"snapshot": snapshot["_id"], "reporter": TUNISIA})
+        missing = client.get("/api/products/100119/tariffs", params={"snapshot": plain["_id"], "reporter": TUNISIA})
+    body = found.json()
+    assert [(m["isoCode"], m["rate"], m["minRate"], m["maxRate"]) for m in body["markets"]] == [
+        ("CHN", None, 1.0, 65.0), ("TUN", 36.0, 36.0, 36.0), ("FRA", 12.8, 0.0, 25.6), ("ITA", 12.8, 0.0, 25.6), ("USA", 0.0, 0.0, 0.0),
+    ]
+    assert body["markets"][0]["sourceCodes"] == 2
+    assert body["exportYear"] == 2024
+    assert {m["isoCode"]: m["exportsUsd"] for m in body["markets"]} == {"CHN": 6000, "TUN": None, "FRA": 4000, "ITA": None, "USA": None}
+    assert body["own"]["schedule"] == "TUN"
+    assert body["source"]["disclaimer"].endswith("the user assumes all risk in their use.")
+    assert heading.status_code == 422 and missing.status_code == 404
+
+
+@pytest.fixture
+def named(db, make_archive, tmp_path):
+    snapshot = prepare(make_archive(NETWORK), db, hs_paths=hs_files(tmp_path))
+    with TestClient(app) as client:
+        client.params = {"snapshot": snapshot["_id"], "reporter": TUNISIA}
+        yield client
+
+
+def test_categories_sum_each_level_exactly(named):
+    tree = named.get("/api/categories").json()
+    assert (tree["year"], tree["totalUsd"]) == (2024, 83000)
+    [vegetable, chemical] = tree["sections"]
+    assert (vegetable["code"], vegetable["name"], vegetable["valueUsd"]) == ("II", "Vegetable products", 74000)
+    [cereals] = vegetable["children"]
+    [wheat] = cereals["children"]
+    assert (wheat["code"], wheat["name"]) == ("1001", "Wheat and meslin")
+    assert [(p["code"], p["valueUsd"]) for p in wheat["children"]] == [("100119", 70000), ("100199", 4000)]
+    assert (chemical["code"], chemical["valueUsd"]) == ("VI", 9000)
+
+
+def test_categories_need_hs_names(api):
+    assert api.get("/api/categories").status_code == 404
+
+
+def test_search_puts_a_named_heading_before_its_products(named):
+    search = lambda q: [p["productCode"] for p in named.get("/api/products", params={"q": q}).json()]
+    assert search("wheat") == ["1001", "100119"]
+    assert search("cereal") == ["10"]
+    assert search("fertil") == ["31", "3102", "310230"]
+    assert search("live")[:2] == ["0101", "01"]
