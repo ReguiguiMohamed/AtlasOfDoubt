@@ -5,22 +5,48 @@ database equals the sum that was written.
 """
 
 import os
+import struct
 from decimal import Decimal
 
 from bson.codec_options import CodecOptions, TypeCodec, TypeRegistry
-from bson.decimal128 import Decimal128
+from bson.decimal128 import Decimal128, create_decimal128_context
 from pymongo import MongoClient
+
+BID = struct.Struct("<QQ")
+CONTEXT = create_decimal128_context()
+BIAS = 6176
+LOW = (1 << 64) - 1
+SIGN = 1 << 63
+SPECIAL = 3 << 61
+MAX_SIGNIFICAND = 10**34 - 1
 
 
 class DecimalCodec(TypeCodec):
+    """pymongo's own conversion loops over bits in Python and took most of a first visit.
+
+    Finite values of up to 34 digits are packed with integer arithmetic here,
+    bit for bit the same as pymongo's, and anything else goes through pymongo.
+    """
+
     python_type = Decimal
     bson_type = Decimal128
 
     def transform_python(self, value):
-        return Decimal128(value)
+        sign, digits, exponent = value.as_tuple()
+        if isinstance(exponent, str) or len(digits) > 34 or not -BIAS <= exponent <= 6111:
+            return Decimal128(value)
+        significand = int(value.copy_abs().scaleb(-exponent, CONTEXT))
+        high = (significand >> 64) | ((exponent + BIAS) << 49) | (SIGN if sign else 0)
+        return Decimal128((high, significand & LOW))
 
     def transform_bson(self, value):
-        return value.to_decimal()
+        low, high = BID.unpack(value.bid)
+        significand = ((high & 0x1FFFFFFFFFFFF) << 64) | low
+        exponent = ((high >> 49) & 0x3FFF) - BIAS
+        if high & SPECIAL == SPECIAL or significand > MAX_SIGNIFICAND or exponent > 6111:
+            return value.to_decimal()
+        sign = "-" if high & SIGN else ""
+        return Decimal(f"{sign}{significand}E{exponent}")
 
 
 CODEC_OPTIONS = CodecOptions(type_registry=TypeRegistry([DecimalCodec()]), tz_aware=True)
