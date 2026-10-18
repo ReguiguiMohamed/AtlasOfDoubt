@@ -100,6 +100,14 @@ async function render() {
   }
   section.setAttribute("aria-busy", "true");
   section.dataset.loading = t("Loading trade data...");
+  const started = Date.now();
+  // Warm pages answer within a few seconds, so a longer wait is a country's view being built on its first visit.
+  const building = setInterval(() => {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    if (seconds >= 5 && state.reporter) {
+      section.dataset.loading = t("Building the view of {country}: {seconds} s. A country's first visit takes up to 2 minutes, later visits open at once.", { country: state.reporter.countryName, seconds });
+    }
+  }, 1000);
   try {
     await snapshotDetail();
     reporterPicker.innerHTML = `<option value="">${t("Choose")}</option>${[...state.detail.countries]
@@ -110,6 +118,7 @@ async function render() {
   } catch (error) {
     section.innerHTML = `<p class="error">${esc(error.message)}</p>`;
   } finally {
+    clearInterval(building);
     section.removeAttribute("aria-busy");
   }
 }
