@@ -22,7 +22,7 @@ export async function api(path, options = {}) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const detail = typeof body.detail === "string" ? body.detail : body.detail?.[0]?.msg;
-    throw new Error(detail ?? `${response.status} ${response.statusText}`);
+    throw Object.assign(new Error(detail ?? `${response.status} ${response.statusText}`), { status: response.status });
   }
   const body = await response.json();
   return regionNames ? localize(body) : body;

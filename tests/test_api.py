@@ -93,6 +93,14 @@ def preview(api, **spec):
     return response.json()["result"]
 
 
+def test_history_lists_world_exporters_without_the_reporter(api):
+    one = {y["year"]: y for y in api.get("/api/products/010121/history").json()["years"]}
+    group = {y["year"]: y for y in api.get("/api/products/01/history").json()["years"]}
+    assert [(e["isoCode"], e["valueUsd"]) for e in one[2012]["exporters"]] == [("FRA", 160000), ("ITA", 30000), ("USA", 10000)]
+    assert one[2012]["exporters"][0]["share"] == pytest.approx(160 / 205)
+    assert group[2012]["exporters"] == []
+
+
 def test_product_scenario_follows_the_blueprint_rule(api):
     result = preview(api, mode="product", productCode="010121", suppliers=[251], reduction=0.5)
     assert result["affectedUsd"] == 30000
@@ -135,7 +143,7 @@ def test_report_ignores_numbers_sent_by_the_browser(api):
     saved = api.get(f"/api/reports/{report(api, affectedUsd=1)}").json()
     assert saved["result"]["affectedUsd"] == 30000
     assert saved["snapshot"]["archive"]["filename"] == "BACI_HS12_V202601.zip"
-    assert saved["snapshot"]["manifest"]["layoutVersion"] == "1"
+    assert saved["snapshot"]["manifest"]["layoutVersion"] == "3"
     assert saved["reporter"] == {"countryCode": TUNISIA, "countryName": "Tunisia", "isoCode": "TUN"}
     assert saved["calculationVersion"] == "2"
 

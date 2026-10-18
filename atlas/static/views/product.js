@@ -73,8 +73,15 @@ export default async function product(root, [code], params) {
     <div class="panel"><h2>${t("Exports of {reporter}, {from} to {to}", { reporter, from: data.years[0].year, to: data.years.at(-1).year })}</h2>
       <p>${t("Revealed comparative advantage compares the share of this code in the exports of {reporter} with its share in world exports. Above 1, {reporter} exports relatively more of it than the world does.", { reporter })}</p>
       <div class="chart" id="exports"></div></div>
-    ${current.world ? `<div class="panel"><h2>${t("Who else sells it, {year}", { year: current.year })}</h2>
-      <p>${t("The largest exporters of this product worldwide, against what each sent {reporter}. A large exporter that sends little is a supplier {reporter} could turn to.", { reporter })}</p>
+    ${single && current.exporters.length ? `<div class="panel" id="alternatives"><h2>${t("Who else sells it, {year}", { year: current.year })}</h2>
+      <p>${t("The {count} largest exporters of this product worldwide, against what each sent {reporter}. A large exporter that sends nothing yet, shown in red, is a supplier {reporter} could turn to. Under most-favoured-nation terms {reporter} charges each of them the same tariff, so the filters weigh closeness instead.", { reporter, count: current.exporters.length })}</p>
+      <form class="controls">
+        ${state.snapshot.geography ? `<label>${t("Distance")} <select name="km"><option value="">${t("any")}</option>${[1000, 3000, 6000, 10000].map((k) => `<option value="${k}">${t("under {km}", { km: km(k) })}</option>`).join("")}</select></label>
+        <label><input type="checkbox" name="contiguous"> ${t("Shares a border")}</label>
+        <label><input type="checkbox" name="commonLanguage"> ${t("Shares an official language")}</label>` : ""}
+        <label><input type="checkbox" name="untapped"> ${t("Not yet a supplier")}</label>
+        <span class="count" id="alternatives-count"></span>
+      </form>
       <div id="exporters"></div></div>` : ""}
     ${single ? "" : `<div class="panel"><h2>${t("Products in this group")}</h2><div id="members"></div></div>`}
   `));
@@ -223,7 +230,8 @@ export default async function product(root, [code], params) {
     })),
   });
 
-  if (current.world) {
+  const alternatives = root.querySelector("#alternatives");
+  if (alternatives) {
     const share = Object.fromEntries(ranked.map((s) => [s.countryCode, s.share]));
     const exporters = table(root.querySelector("#exporters"), {
       data: current.world.topExporters.map((e) => ({ ...e, reporter: share[e.countryCode] ?? 0 })),
@@ -290,3 +298,19 @@ async function search(root, q) {
   });
   if (q) run();
 }
+        usdColumn(t("World exports"), "valueUsd"),
+        ...geoColumns(),
+    const form = alternatives.querySelector("form");
+    const narrow = () => {
+      const f = Object.fromEntries(new FormData(form));
+      const keep = (r) => (!f.km || (r.distanceKm != null && r.distanceKm < Number(f.km)))
+        && (!f.contiguous || r.contiguous) && (!f.commonLanguage || r.commonLanguage) && (!f.untapped || r.reporter === 0);
+      exporters.setFilter(keep);
+      const shown = rows.filter(keep);
+      alternatives.querySelector("#alternatives-count").textContent = t("{shown} of {total} exporters, {untapped} not yet supplying {reporter}", {
+        shown: shown.length, total: rows.length, untapped: shown.filter((r) => r.reporter === 0).length, reporter: state.reporter.countryName,
+      });
+    };
+    form.addEventListener("change", narrow);
+    form.addEventListener("submit", (e) => e.preventDefault());
+    exporters.on("tableBuilt", narrow);

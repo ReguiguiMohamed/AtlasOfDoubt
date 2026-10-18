@@ -213,8 +213,17 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     by_year = {}
     for doc in cached(db, generation, code):
         by_year.setdefault(doc["year"], []).append(doc)
-    world_totals, baskets = {}, {}
-    if len(code) < 6:
+    world_totals, baskets, exporters = {}, {}, {}
+    if len(code) == 6:
+        names = names_of(snapshot)
+        exporters = {
+            w["year"]: [
+                {**{k: names[e["countryCode"]][k] for k in ("countryCode", "countryName", "isoCode")}, "valueUsd": e["valueUsd"], "share": e["valueUsd"] / w["totalUsd"]}
+                for e in w["topExporters"] if e["countryCode"] != reporter
+            ]
+            for w in db.world_product_years.find({"snapshotId": snapshot_id, "productCode": code}, {"year": 1, "totalUsd": 1, "topExporters": 1})
+        }
+    else:
         world = db.world_product_years.aggregate([
             {"$match": {"snapshotId": snapshot_id, "productCode": {"$regex": f"^{code}"}}},
             {"$group": {"_id": "$year", "totalUsd": {"$sum": "$totalUsd"}}},
@@ -269,6 +278,9 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
     }
     own = {"$first": {"$filter": {"input": "$imports.suppliers", "cond": {"$eq": ["$$this.countryCode", country_code]}}}}
     supplied = db.country_product_years.aggregate([
+    A product's year also lists the world's largest exporters of it other than
+    the reporter, each with its share of world exports.
+
         {"$match": {"generationId": generation, "imports.suppliers.countryCode": country_code}},
         {"$project": {"year": 1, "own": own}},
         {"$group": {"_id": "$year", "valueUsd": {"$sum": "$own.valueUsd"}, "productCount": {"$sum": 1}}},
@@ -311,6 +323,7 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
         "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]}
         if route else None,
     }
+            "exporters": exporters.get(year, []),
 
 
 @app.get("/api/routes")

@@ -41,8 +41,9 @@ from atlas.db import connect
 YEARS = range(2012, 2025)
 HEADER = "t,i,j,k,v,q"
 SAMPLE_LIMIT = 100
-WORLD_TOP = 6
-LAYOUT_VERSION = "1"
+# Deep enough for the product page to list alternative suppliers, while views copy only the first few.
+WORLD_TOP = 25
+LAYOUT_VERSION = "3"
 DATA = Path(os.environ.get("ATLAS_DATA", "data/snapshots"))
 GDP_INDICATOR = "NY.GDP.PCAP.PP.KD"
 GDP_URL = f"https://api.worldbank.org/v2/country/all/indicator/{GDP_INDICATOR}?format=json&date=2012:2024&per_page=20000"
@@ -139,8 +140,16 @@ def read_dictionary(archive, name, columns):
     with archive.open(name) as raw:
         reader = csv.DictReader(io.TextIOWrapper(raw, "utf-8-sig", newline=""))
         if not set(columns) <= set(reader.fieldnames or []):
+def unmangle(text):
+    """CEPII's country list stores some names encoded twice, Côte as CÃ´te. Clean text fails the round trip and stays."""
+    try:
+        return text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
             raise PrepareFailed(f"{name} lacks columns {columns}")
-        return [{c: row[c].strip() for c in columns} for row in reader]
+        return [{c: unmangle(row[c].strip()) for c in columns} for row in reader]
 
 
 def download(url, path):
