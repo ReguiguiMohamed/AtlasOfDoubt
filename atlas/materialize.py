@@ -2,7 +2,8 @@
 
 The country's imports come from its own Parquet partition and its exports
 from its export partition, joined to the world aggregates the snapshot
-already holds. Each build is one generation of documents, readable only
+already holds. The last year's exports also keep their destinations, read
+from every importer's partition of that year. Each build is one generation of documents, readable only
 after its job is marked ready, so a failed or interrupted build never
 shows. The least recently used generations are evicted once the cache
 passes its byte budget.
@@ -98,6 +99,8 @@ def build(db, snapshot, country, generation):
     root = DATA / snapshot["storage"]["path"]
     flow_files = parquet(root / "flows" / f"importer={country}")
     export_files = parquet(root / "exports" / f"country={country}")
+    last = max(snapshot["years"])
+    sold_files = sorted(p.as_posix() for p in (root / "flows").glob(f"*/year={last}/*.parquet"))
     with duckdb.connect() as con:
         flows = con.execute(
             "SELECT year, product, exporter, v * 1000, q FROM read_parquet(?, hive_partitioning = true)"
@@ -108,6 +111,11 @@ def build(db, snapshot, country, generation):
             "SELECT year, product, value, quantity_value, tonnes FROM read_parquet(?, hive_partitioning = true)",
             [export_files],
         ).fetchall() if export_files else []
+        sold = con.execute(
+            "SELECT product, importer, v * 1000 FROM read_parquet(?, hive_partitioning = true)"
+            " WHERE exporter = ? ORDER BY product, v DESC, importer",
+            [sold_files, country],
+        ).fetchall() if sold_files else []
 
     names = {c["countryCode"]: c for c in snapshot["countries"]}
     suppliers = {}
@@ -119,6 +127,9 @@ def build(db, snapshot, country, generation):
             "valueUsd": value,
             "quantityTonnes": tonnes,
         })
+    destinations = {}
+    for product, importer, value in sold:
+        destinations.setdefault(product, []).append({"countryCode": importer, "valueUsd": value})
     exported = {(product, year): (value, quantity_value, tonnes) for year, product, value, quantity_value, tonnes in exports}
     keys = suppliers.keys() | exported.keys()
     codes = sorted({product for product, _ in keys})
@@ -161,6 +172,8 @@ def build(db, snapshot, country, generation):
                 "prody": world["prody"],
                 "qualityFlags": metrics.quality_flags(coverage, tonnes, unit_value, world["unitValueUsdPerTonne"]),
             }
+            if year == last:
+                doc["exports"]["destinations"] = destinations.get(product, [])
         docs.append(doc)
     if docs:
         db.country_product_years.insert_many(docs, ordered=False)

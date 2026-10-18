@@ -18,6 +18,9 @@
   --border: #7d8a99;
   --supply: #c96f12;
   --supply-soft: #f8deb0;
+  --tariff: #4b2a7b;
+  --tariff-soft: #ece6f5;
+  --sold: #1b7f5b;
   --radius: 6px;
   color-scheme: light;
 }
@@ -95,6 +98,8 @@ main { max-width: 1240px; margin: 0 auto; padding: 2.5rem 2rem 1.5rem; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: end; margin-top: 1.25rem; }
 .controls label { display: grid; gap: 0.25rem; font-size: 0.8rem; color: var(--muted); }
+.controls label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: 0.4rem; }
+.controls .count { font-size: 0.8rem; color: var(--muted); }
 
 input, select, button, textarea {
   font: inherit;

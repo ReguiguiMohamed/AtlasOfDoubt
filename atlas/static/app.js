@@ -83,6 +83,8 @@ async function render() {
 function showCitation() {
   const source = state.snapshot?.source;
   const geography = state.snapshot?.geography;
+  const tariffs = state.snapshot?.tariffs;
+  const categories = state.snapshot?.categories;
   document.getElementById("citation").innerHTML = source
     ? esc(t("Data: {name} {classification}, release {release}, {unit}. {citation} Licence: {license}.", {
         ...source,

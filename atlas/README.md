@@ -11,7 +11,8 @@ process.
 | [`db.py`](db.py) | both | connects with Decimal stored as Decimal128 and creates the indexes |
 | [`prepare.py`](prepare.py) | once per release | checks the 13 annual files in DuckDB, writes flows as Parquet by importer and year, stores world and country-year aggregates and the CEPII GeoDist pairs, writes the error report |
 | [`coverage.py`](coverage.py) | before adding tariffs or geography | matches the WITS/TRAINS schedule list and CEPII GeoDist to BACI's countries and writes `coverage.csv` with each country's tariff years, HS revision and geography |
-| [`materialize.py`](materialize.py) | first visit to a country | builds that country's import and export view from its Parquet partition into MongoDB, under a lease, and evicts the least recently used views |
+| [`tariffs.py`](tariffs.py) | before adding tariffs | downloads each country's latest WITS/TRAINS MFN schedule and the WITS HS concordances, maps every schedule to HS2012 and writes `tariffs.csv` and `tariff-schedules.csv` |
+| [`materialize.py`](materialize.py) | first visit to a country | builds that country's import and export view from its Parquet partition into MongoDB, with the last year's export destinations of each product, under a lease, and evicts the least recently used views |
 | [`routes.py`](routes.py) | every request | the modelled sea lane from each partner region to the reporter and the chokepoints on it |
 | [`api.py`](api.py) | server | read endpoints scoped by `snapshot` and `reporter`, scenario preview, immutable reports, CSV export, the static mount |
 | [`static/`](static/) | browser | plain ES modules with a hash router, ECharts 5.6.0 and Tabulator 6.3.1 from jsDelivr with SRI hashes |

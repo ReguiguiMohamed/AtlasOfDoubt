@@ -21,6 +21,7 @@ import hashlib
 import io
 import json
 import os
+import itertools
 import re
 import shutil
 import struct
@@ -139,7 +140,6 @@ def read_dictionary(archive, name, columns):
         raise PrepareFailed(f"{name} is missing from the archive")
     with archive.open(name) as raw:
         reader = csv.DictReader(io.TextIOWrapper(raw, "utf-8-sig", newline=""))
-        if not set(columns) <= set(reader.fieldnames or []):
 def unmangle(text):
     """CEPII's country list stores some names encoded twice, Côte as CÃ´te. Clean text fails the round trip and stays."""
     try:
@@ -148,6 +148,7 @@ def unmangle(text):
         return text
 
 
+        if not set(columns) <= set(reader.fieldnames or []):
             raise PrepareFailed(f"{name} lacks columns {columns}")
         return [{c: unmangle(row[c].strip()) for c in columns} for row in reader]
 
@@ -407,7 +408,7 @@ def prepare(path, db, gdp_path=None, geo_paths=None):
     existing = db.snapshots.find_one({"_id": snapshot_id})
     if existing and existing["status"] == "ready":
         return existing
-    for collection in (db.products, db.world_product_years, db.country_years, db.geo_pairs):
+    for collection in (db.products, db.world_product_years, db.country_years, db.geo_pairs, db.tariffs):
         collection.delete_many({"snapshotId": snapshot_id})
 
     snapshot = {
@@ -539,3 +540,8 @@ if __name__ == "__main__":
     with client:
         result = prepare(sys.argv[1], database, gdp_path, geo_paths)
     print(f"{result['_id']} {result['status']}: {result['counts']}, {result['errors']['rejectedRows']} rows rejected")
+            if tariff_docs:
+                rows = tariff_docs(snapshot_id)
+                while batch := list(itertools.islice(rows, 10_000)):
+                    db.tariffs.insert_many(batch, ordered=False)
+            | ({"tariffSchedule": applied[int(r["country_code"])]} if int(r["country_code"]) in applied else {})

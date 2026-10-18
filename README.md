@@ -61,6 +61,16 @@ python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
 
 ```bash
 uvicorn atlas.api:app
+Tariffs are optional. These two fetch the WITS schedule list and the latest schedule of every BACI country, 170 files and 280 MB, into `data/snapshots/`, and prepare picks them up:
+
+```bash
+python -m atlas.coverage data/raw/BACI_HS12_V202601.zip
+```
+
+```bash
+python -m atlas.tariffs
+```
+
 ```
 
 A new release takes the same one command with its own archive. `pytest -q` runs the tests against the same local MongoDB in a database of its own, `atlas_test`.
