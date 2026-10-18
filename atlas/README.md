@@ -127,7 +127,7 @@ reporter.
 
 ## Tests
 
-`pytest -q` runs 89 tests against a local MongoDB on port 27017. CI starts a
+`pytest -q` runs 91 tests against a local MongoDB on port 27017. CI starts a
 MongoDB 9.0 service for them.
 
 `node --test tests/frontend.test.mjs` checks chart tooltip confinement, toolbar
