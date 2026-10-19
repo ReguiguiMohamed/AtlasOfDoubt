@@ -1,0 +1,31 @@
+# The public server. Caddy holds ports 80 and 443 with a Let's Encrypt certificate for ATLAS_HOST and is
+# the only way in, so the app can trust the client address Caddy forwards for the report limit.
+#   ATLAS_HOST=atlasofdoubt.francecentral.cloudapp.azure.com docker compose -f docker-compose.yml -f deploy/compose.yml up --build -d
+services:
+  mongo:
+    # DuckDB needs most of the VM's 4 GB on a first visit, so mongod keeps a smaller cache.
+    command: --wiredTigerCacheSizeGB 1
+    volumes:
+      - ./data/snapshots/mongo-dump:/dump:ro
+    restart: unless-stopped
+  app:
+    # The warm-up rebuilds the last visited countries at boot, and a spike past this kills the app, not the VM.
+    mem_limit: 2500m
+    memswap_limit: 3500m
+    ports: !reset []
+    environment:
+      FORWARDED_ALLOW_IPS: "*"
+    restart: unless-stopped
+  caddy:
+    image: caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb
+    command: caddy reverse-proxy --from ${ATLAS_HOST:?set ATLAS_HOST} --to app:8000
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy:/data
+    depends_on:
+      - app
+    restart: unless-stopped
+volumes:
+  caddy:
