@@ -1,5 +1,6 @@
 import { lang, t } from "../i18n.js";
-import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, indexColumn, km, kpi, pct, pctColumn, query, reach, scoped, state, storeTag, table, twins, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, indexColumn, km, kpi, pct, pctColumn, query, reach, scoped, state, storeTag, table, usd, usdColumn } from "../lib.js";
+import twins from "./twins.js";
 
 const THRESHOLDS = [0, 100_000, 1_000_000, 10_000_000, 100_000_000];
 const BARS = 15;

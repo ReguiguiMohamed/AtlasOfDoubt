@@ -27,6 +27,7 @@ globalThis.echarts = {
 };
 
 const { api, chart, disposeCharts, preload, relativeRanks } = await import("../atlas/static/lib.js");
+const { cut } = await import("../atlas/static/map.js");
 const node = () => ({ append() {} });
 afterEach(disposeCharts);
 
@@ -134,4 +135,13 @@ test("snapshot answers are fetched once and each reader gets its own copy", asyn
     "GET /api/reports?reporter=1", "GET /api/reports?reporter=1",
     "POST /api/scenarios/preview?snapshot=s", "POST /api/scenarios/preview?snapshot=s",
   ]);
+});
+
+test("cut splits a lane only where it crosses the map's edge", () => {
+  const pacific = [[140, 33], [180, 38], [-140, 30]];
+  assert.equal(cut(pacific, 0).length, 2);
+  assert.equal(cut(pacific, 150).length, 1);
+  for (const piece of cut(pacific, 0)) for (const [x] of piece) assert.ok(Math.abs(x) <= 180);
+  // A point a hair past the edge once set the step count to Infinity.
+  assert.equal(cut([[179.95000000000005, -60], [179.95000000000005, 60]], 0).length, 1);
 });

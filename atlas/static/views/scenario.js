@@ -1,5 +1,6 @@
 import { lang, t } from "../i18n.js";
-import { api, axis, chart, css, esc, html, km, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, chart, css, esc, html, km, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
+import { loadWorld, redraw, shapeId, worldMap } from "../map.js";
 
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const ids = (value) => (value ?? "").split(",").filter(Boolean);
@@ -360,10 +361,7 @@ function crisisOption(r, reporter) {
   const lane = (x, coords, lineStyle) => ({ name: t(x.name), coords, item: x, lineStyle });
   return {
     geo: {
-      map: "world",
       silent: true,
-      left: 0, right: 0, top: 0, bottom: 0,
-      itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
       regions: [
         ...r.suppliers.map((s) => ({
           name: shapeId(s.countryCode),
@@ -386,15 +384,13 @@ function crisisOption(r, reporter) {
       },
       {
         id: "detours", type: "lines", coordinateSystem: "geo", polyline: true, z: 3,
-        effect: { show: !calm, constantSpeed: 45, symbol: "arrow", symbolSize: 7, trailLength: 0.15, color: css("--sold") },
-        data: r.routes.filter((x) => x.detour).map((x) => lane(x, x.detour.path, { width: width(x), color: css("--sold"), type: "dashed", opacity: 0.9 })),
+        effect: { show: !calm, constantSpeed: 45, symbol: "arrow", symbolSize: 6, color: css("--sold") },
+        data: r.routes.filter((x) => x.detour).map((x) => lane(x, x.detour.path, { width: Math.min(3, width(x)), color: css("--sold"), opacity: 0.85 })),
       },
       {
-        id: "closed", type: "effectScatter", coordinateSystem: "geo", z: 4,
-        rippleEffect: { scale: 5, brushType: "stroke", period: 2.5 },
-        showEffectOn: calm ? "emphasis" : "render",
-        symbolSize: 13,
-        itemStyle: { color: css("--warn") },
+        id: "closed", type: "scatter", coordinateSystem: "geo", z: 4,
+        symbol: "rect", symbolSize: 9, symbolRotate: 45,
+        itemStyle: { color: css("--warn"), borderColor: "#fff", borderWidth: 1.5 },
         label: { show: true, position: "right", fontWeight: 600, color: css("--warn"), backgroundColor: "#ffffffeb", padding: [3, 5], borderRadius: 3, formatter: (p) => p.name },
         data: r.closed.map((c) => ({ name: t(c.name), value: c.at })),
       },
@@ -470,7 +466,7 @@ export function resultView(node, reporter) {
         </div>
         <div class="kpis" id="figures"></div>
         <div class="panel"><h2>${t("Crisis map")}</h2>
-          <p>${t("Closed straits pulse in red. Red lanes are cut and dotted ones are given up, while the green arrows are ships sent round the long way. Supplier countries are shaded by the value hit, in orange where it still arrives late, and {reporter} is dark.", { reporter: esc(reporter.countryName) })}</p>
+          <p>${t("Red diamonds mark closed straits. Red lanes are cut and dotted ones are given up, while green lanes carry ships sent round the long way. Supplier countries are shaded by the value hit, in orange where it still arrives late, and {reporter} is dark.", { reporter: esc(reporter.countryName) })}</p>
           <div class="chart map" id="crisis"></div></div>
         <div class="grid">
           <div class="panel"><h2>${t("From the value hit to the gap")}</h2>
@@ -490,7 +486,7 @@ export function resultView(node, reporter) {
       loadWorld()
         .then(() => {
           if (!crisis.isConnected) return;
-          parts.map = zoomable(chart(crisis, { tooltip: { formatter: (p) => (p.data?.item ? laneTip(p.data.item) : esc(p.name)) }, ...crisisOption(parts.r, reporter) }), "geo");
+          parts.map = worldMap(crisis, { tooltip: { formatter: (p) => (p.data?.item ? laneTip(p.data.item) : esc(p.name)) }, ...crisisOption(parts.r, reporter) });
         })
         .catch(() => crisis.closest(".panel").remove());
       parts.products = table(node.querySelector("#products"), {
@@ -535,7 +531,7 @@ export function resultView(node, reporter) {
     Object.assign(parts, { spec, r });
     clearInterval(parts.timer);
     node.querySelector("#replay-note").textContent = "";
-    parts.map?.setOption(crisisOption(r, reporter), { replaceMerge: ["series"] });
+    if (parts.map) redraw(parts.map, crisisOption(r, reporter), { replaceMerge: ["series"] });
     node.querySelector("#terms").textContent = shockTerms(spec);
     node.querySelector("#name").textContent = name;
     node.querySelector("#story").innerHTML = story(spec, r, reporter);

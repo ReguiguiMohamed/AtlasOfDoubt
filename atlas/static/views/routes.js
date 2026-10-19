@@ -1,5 +1,6 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, usd, usdColumn, whenFilled, zoomable } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn, whenFilled } from "../lib.js";
+import { loadWorld, redraw, shapeId, worldMap } from "../map.js";
 
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -62,10 +63,7 @@ export default async function seaRoutes(root, _, params) {
   const largest = ranked[0].valueUsd || 1;
   const mapOption = () => ({
     geo: {
-      map: "world",
       silent: true,
-      left: 0, right: 0, top: 0, bottom: 0,
-      itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
       regions: [
         ...selected.countries.map((c) => ({ name: shapeId(c.countryCode), itemStyle: { areaColor: css("--supply-soft") } })),
         { name: shapeId(state.reporter.countryCode), itemStyle: { areaColor: css("--warn") } },
@@ -77,7 +75,7 @@ export default async function seaRoutes(root, _, params) {
         type: "lines",
         coordinateSystem: "geo",
         polyline: true,
-        effect: { show: !calm, constantSpeed: 30, symbol: "circle", symbolSize: 3, trailLength: 0, color: css("--accent") },
+        effect: { show: !calm, constantSpeed: 30, symbol: "circle", symbolSize: 3, color: css("--accent") },
         emphasis: { focus: "self", lineStyle: { color: css("--warn"), opacity: 1 } },
         data: data.routes.filter((r) => r.path && r.valueUsd > 0).map((r) => ({
           name: r.name,
@@ -113,7 +111,7 @@ export default async function seaRoutes(root, _, params) {
   loadWorld()
     .then(() => {
       if (!where.isConnected) return;
-      map = zoomable(chart(where.querySelector("#map"), { tooltip: { formatter: (p) => (p.data?.item ? tip(p.data.item) : "") }, ...mapOption() }), "geo");
+      map = worldMap(where.querySelector("#map"), { tooltip: { formatter: (p) => (p.data?.item ? tip(p.data.item) : "") }, ...mapOption() });
       map.on("click", (p) => p.data?.item && select(p.data.item));
     })
     .catch(() => where.remove());
@@ -202,7 +200,7 @@ export default async function seaRoutes(root, _, params) {
   async function select(item) {
     selected = item;
     history.replaceState(null, "", link({ select: item.id }));
-    map?.setOption(mapOption());
+    if (map) redraw(map, mapOption());
     const strait = item.path === undefined;
     const scenario = `#/scenario?${query({ code, year: data.year, [strait ? "chokepoints" : "regions"]: item.id })}`;
     detail.querySelector("#title").textContent = t(item.name);

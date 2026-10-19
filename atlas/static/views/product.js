@@ -1,5 +1,6 @@
 import { t } from "../i18n.js";
-import { api, axis, centroid, chart, count, css, doubling, esc, geoColumns, gravity, html, index, km, kpi, loadWorld, pct, pctColumn, query, reach, scoped, shapeId, state, storeTag, table, tonsColumn, unavailable, usd, usdColumn, whenFilled, zoomable } from "../lib.js";
+import { api, axis, chart, count, css, doubling, esc, geoColumns, gravity, html, index, km, kpi, pct, pctColumn, query, reach, scoped, state, storeTag, table, tonsColumn, unavailable, usd, usdColumn, whenFilled } from "../lib.js";
+import { centroid, loadWorld, redraw, shapeId, worldMap } from "../map.js";
 
 const CASE_STUDIES = [
   ["10", "Cereals (chapter 10)"],
@@ -109,33 +110,11 @@ function tariffWall(panel, data, reporter, profile) {
   });
 
   loadWorld()
-    .then(() => panel.isConnected && zoomable(chart(panel.querySelector("#tariff-map"), {
+    .then(() => panel.isConnected && worldMap(panel.querySelector("#tariff-map"), {
       tooltip: { formatter: (p) => (p.data?.market ? tip(p.data.market) : "") },
-      visualMap: {
-        min: 0,
-        max: top,
-        orient: "horizontal",
-        left: "center",
-        bottom: 0,
-        itemWidth: 10,
-        itemHeight: 120,
-        text: [`${pct(top / 100, 0)}+`, pct(0, 0)],
-        textStyle: { color: css("--muted") },
-        inRange: { color: [css("--tariff-soft"), css("--tariff")] },
-      },
-      series: [{
-        type: "map",
-        map: "world",
-        selectedMode: false,
-        left: 0,
-        right: 0,
-        top: 0,
-        bottom: 34,
-        itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
-        emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent") } },
-        data: markets.map((m) => ({ name: shapeId(m.countryCode), value: charged(m), market: m, itemStyle: mine(m) })),
-      }],
-    }), "series").on("click", (p) => profile(p.data?.market?.countryCode)))
+      visualMap: { min: 0, max: top, text: [`${pct(top / 100, 0)}+`, pct(0, 0)], inRange: { color: [css("--tariff-soft"), css("--tariff")] } },
+      series: [{ type: "map", data: markets.map((m) => ({ name: shapeId(m.countryCode), value: charged(m), market: m, itemStyle: mine(m) })) }],
+    }).on("click", (p) => profile(p.data?.market?.countryCode)))
     .catch(() => panel.querySelector("#tariff-map").remove());
 
   // A range floats from its lowest to its highest rate on a transparent base.
@@ -211,6 +190,7 @@ function supplyMap(panel, recorded, current, located, code, own) {
     return {
       series: [
         {
+          type: "map",
           data: [
             ...rows.map((s) => ({
               name: shapeId(s.countryCode), value: s.share, supplier: s,
@@ -220,6 +200,8 @@ function supplyMap(panel, recorded, current, located, code, own) {
           ],
         },
         {
+          type: "lines",
+          polyline: true,
           data: flows.map((f) => ({ coords: [f.from, home], supplier: f.s, lineStyle: { width: 1 + 5 * Math.sqrt(f.s.valueUsd / widest) } })),
         },
       ],
@@ -233,48 +215,19 @@ function supplyMap(panel, recorded, current, located, code, own) {
       : own.tariff ? t("Tariff of {reporter} on it: {rate}, most-favoured-nation", { reporter: esc(reporter.countryName), rate: rateText(own.tariff) }) : "",
     `<i>${t("Click for what it sells here")}</i>`,
   ].filter(Boolean).join("<br>");
-  const instance = chart(panel.querySelector("#map"), {
+  const instance = worldMap(panel.querySelector("#map"), {
     tooltip: { formatter: (p) => (p.data?.supplier ? tip(p.data.supplier) : p.data?.home ? `<b>${esc(reporter.countryName)}</b>` : "") },
-    visualMap: {
-      seriesIndex: 0,
-      min: 0,
-      max: top,
-      orient: "horizontal",
-      left: "center",
-      bottom: 0,
-      itemWidth: 10,
-      itemHeight: 120,
-      text: [pct(top, 0), pct(0, 0)],
-      textStyle: { color: css("--muted") },
-      inRange: { color: [css("--supply-soft"), css("--supply")] },
-    },
-    geo: {
-      map: "world",
-      left: 0,
-      right: 0,
-      top: 0,
-      bottom: 34,
-      selectedMode: false,
-      itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
-      emphasis: { label: { show: false }, itemStyle: { areaColor: css("--accent") } },
-    },
+    visualMap: { min: 0, max: top, text: [pct(top, 0), pct(0, 0)], inRange: { color: [css("--supply-soft"), css("--supply")] } },
     series: [
-      { type: "map", geoIndex: 0 },
-      {
-        type: "lines",
-        coordinateSystem: "geo",
-        zlevel: 1,
-        effect: { show: true, period: 5, trailLength: 0.35, symbol: "arrow", symbolSize: 5, color: css("--warn") },
-        lineStyle: { color: css("--supply"), opacity: 0.5, curveness: 0.25 },
-      },
+      { type: "map" },
+      { type: "lines", coordinateSystem: "geo", polyline: true, effect: { show: true, period: 5, symbol: "arrow", symbolSize: 5, color: css("--warn") }, lineStyle: { color: css("--supply"), opacity: 0.5 } },
     ],
   });
-  zoomable(instance, "geo");
   const show = (i) => {
     shown = recorded[i];
     slider.value = i;
     label.textContent = shown.year;
-    instance.setOption(frame(shown));
+    redraw(instance, frame(shown));
   };
   show(recorded.indexOf(current));
   slider.addEventListener("input", () => show(Number(slider.value)));

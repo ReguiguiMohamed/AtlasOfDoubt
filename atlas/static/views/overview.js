@@ -1,5 +1,6 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctColumn, query, scoped, state, storeTag, table, twins, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, index, indexColumn, pct, pctColumn, query, scoped, state, storeTag, table, usd, usdColumn } from "../lib.js";
+import twins from "./twins.js";
 
 // 0.25 is where the 2010 US Horizontal Merger Guidelines start calling a market highly concentrated (HHI 2500 of 10000).
 const HIGH = 0.25;

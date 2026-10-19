@@ -394,7 +394,7 @@ const FR = {
   "{value} hit": "{value} touchés",
   "{km} longer, {days} late": "{km} de plus, {days} de retard",
   "Crisis map": "Carte de crise",
-  "Closed straits pulse in red. Red lanes are cut and dotted ones are given up, while the green arrows are ships sent round the long way. Supplier countries are shaded by the value hit, in orange where it still arrives late, and {reporter} is dark.": "Les détroits fermés clignotent en rouge. Les voies rouges sont coupées et les pointillés abandonnés, tandis que les flèches vertes sont les navires déroutés par le long chemin. Les pays fournisseurs sont teintés selon la valeur touchée, en orange quand elle arrive en retard, et {reporter} est en sombre.",
+  "Red diamonds mark closed straits. Red lanes are cut and dotted ones are given up, while green lanes carry ships sent round the long way. Supplier countries are shaded by the value hit, in orange where it still arrives late, and {reporter} is dark.": "Les losanges rouges marquent les détroits fermés. Les voies rouges sont coupées et les pointillés abandonnés, tandis que les voies vertes portent les navires déroutés par le long chemin. Les pays fournisseurs sont teintés selon la valeur touchée, en orange quand elle arrive en retard, et {reporter} est en sombre.",
   "From the value hit to the gap": "De la valeur touchée au manque",
   "What the shock hits, less what arrives late by another lane and less what the spared exporters replace, leaves the gap.": "Ce que touche le choc, moins ce qui arrive en retard par une autre voie et moins ce que remplacent les exportateurs épargnés, donne le manque.",
   "The same shock in every year": "Le même choc chaque année",

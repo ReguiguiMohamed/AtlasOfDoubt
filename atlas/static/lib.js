@@ -314,63 +314,6 @@ export function countryPicker(node, countries, pick) {
 export const kpi = (label, value, note = "") =>
   `<div class="kpi"><span class="label">${esc(label)}</span><strong>${esc(value)}</strong>${note && `<span class="note">${esc(note)}</span>`}</div>`;
 
-// Wheel, pinch and drag move a map, and the buttons serve readers without a wheel.
-export function zoomable(instance, component) {
-  const at = (option) => instance.setOption({ [component]: [option] });
-  const zoom = (by) => at({ zoom: Math.min(8, Math.max(1, (instance.getOption()[component][0].zoom ?? 1) * by)) });
-  const controls = html(`<div class="zoom" role="group" aria-label="${t("Map controls")}">
-    <button type="button" title="${t("Zoom in")}" aria-label="${t("Zoom in")}">+</button>
-    <button type="button" title="${t("Zoom out")}" aria-label="${t("Zoom out")}">−</button>
-    <button type="button">${t("Whole world")}</button></div>`).firstElementChild;
-  const [zoomIn, zoomOut, reset] = controls.children;
-  zoomIn.addEventListener("click", () => zoom(1.5));
-  zoomOut.addEventListener("click", () => zoom(1 / 1.5));
-  reset.addEventListener("click", () => at({ zoom: 1, center: null }));
-  at({ roam: true, scaleLimit: { min: 1, max: 8 } });
-  // The map moves at once on roam, so animated series would trail behind it.
-  instance.setOption({ animationDurationUpdate: 0 });
-  instance.getDom().append(controls);
-  instance.getDom().append(html(`<a class="map-credit" href="https://www.naturalearthdata.com/" target="_blank" rel="noopener noreferrer">Natural Earth</a>`));
-  return instance;
-}
-
-const ATLAS = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json";
-const ATLAS_SRI = "sha384-Aw4s9pX1PTPntIYkZ/qV9IYiF5Gv8eTl6Dd/TT56zfO1Wwd+owFwYUuuXNUMrWkc";
-// BACI keeps a few pre-ISO country codes where world-atlas uses the current ISO 3166 numeric ones.
-const ISO = { 251: 250, 490: 158, 579: 578, 699: 356, 757: 756, 842: 840 };
-export const shapeId = (code) => String(ISO[code] ?? code).padStart(3, "0");
-
-let world, shapes;
-export function loadWorld() {
-  world ??= fetch(ATLAS, { integrity: ATLAS_SRI })
-    .then((r) => r.json())
-    .then((topo) => {
-      shapes = topojson.feature(topo, topo.objects.countries);
-      shapes.features = shapes.features.filter((f) => f.properties.name !== "Antarctica");
-      // Somaliland, Northern Cyprus and Kosovo carry no ISO id, so they keep their own name and match no supplier.
-      for (const f of shapes.features) {
-        f.properties.name = f.id ?? f.properties.name;
-        // Russia and Fiji have rings that cross the antimeridian and would draw a band across the whole map.
-        const polygons = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
-        for (const ring of polygons.flat()) {
-          const xs = ring.map(([x]) => x);
-          if (Math.max(...xs) - Math.min(...xs) > 180) for (const point of ring) if (point[0] < 0) point[0] += 360;
-        }
-      }
-      echarts.registerMap("world", shapes);
-    });
-  return world;
-}
-
-// ponytail: the mean vertex of a country's largest ring, close enough to start a flow line, and null for countries too small for the map.
-export function centroid(code) {
-  const feature = shapes?.features.find((f) => f.properties.name === shapeId(code));
-  if (!feature) return null;
-  const rings = feature.geometry.type === "Polygon" ? [feature.geometry.coordinates[0]] : feature.geometry.coordinates.map((p) => p[0]);
-  const ring = rings.reduce((a, b) => (b.length > a.length ? b : a));
-  return [0, 1].map((i) => ring.reduce((sum, p) => sum + p[i], 0) / ring.length);
-}
-
 // Names the NoSQL store behind a panel, so each data model's feature is visible.
 export const storeTag = (store) => `<span class="store">${esc(t(store))}</span>`;
 
@@ -378,75 +321,7 @@ export const storeTag = (store) => `<span class="store">${esc(t(store))}</span>`
 export const unavailable = (store) =>
   `<p class="notice">${t("{store} is unavailable, so this panel cannot be drawn. The other views read MongoDB and still work.", { store: esc(t(store)) })}</p>`;
 
-// Shared products stack in rank order, and what the closest twins share beyond them fills the rest of the bar.
-const SHARED_COLORS = ["--accent", "--sold", "--supply"];
-
 export function relativeRanks(values) {
   const sorted = [...new Set(values)].sort((a, b) => a - b);
   return new Map(sorted.map((value, i) => [value, sorted.length > 1 ? i / (sorted.length - 1) : 0.5]));
-}
-
-// The trade twins of the reporter for one flow: a map of every country's similarity and the ten closest with what they share.
-export async function twins(root, flow) {
-  if (!state.snapshot.twins) return;
-  const data = await api(`/twins?${scoped({ flow })}`).catch((e) => e);
-  if (!root.isConnected) return;
-  const heading = `<h2>${t("Trade twins, {year}", { year: state.snapshot.twins.year })} ${storeTag("Milvus vectors")}</h2>`;
-  if (data instanceof Error) {
-    // A 404 means the reporter has no trade in the flow, and only a 503 means the store failed.
-    if (data.status !== 503) return;
-    root.append(html(`<div class="panel" style="margin-top:1.25rem">${heading}${unavailable("Milvus vectors")}</div>`).firstElementChild);
-    return;
-  }
-  const reporter = esc(state.reporter.countryName);
-  const closest = [...data.closest].reverse();
-  const ranks = relativeRanks(data.similar.map((s) => s.similarity));
-  const score = new Intl.NumberFormat(lang, { minimumFractionDigits: 3, maximumFractionDigits: 6 });
-  const products = (s) => s.shared.map((p) => `${esc(p.productCode)} ${esc(p.description)}: ${pct(p.share)} / ${pct(p.twinShare)}`).join("<br>");
-  const tip = (s) => `<b>${esc(s.countryName)}</b>: ${score.format(s.similarity)}` + (s.shared ? `<br>${t("{reporter} / twin share of {flow}", { reporter, flow: t(flow) })}<br>${products(s)}` : "");
-  const panel = html(`<div class="panel" style="margin-top:1.25rem">${heading}
-    <p>${t("The countries whose {flow} look most like those of {reporter}. Each basket is a sparse vector of square-rooted product shares in Milvus, so the score is the Bhattacharyya coefficient: 1 for the same mix, 0 when no product is shared. Each bar splits the score into the products the two share most. Twins trade alike and need not trade with each other.", { reporter, flow: t(flow) })}</p>
-    <p class="map-key"><span><i></i>${esc(state.reporter.countryName)}</span> ${t("Colors show relative similarity rank. Hover for the actual score.")}</p>
-    <div class="twins-layout"><div class="chart map" id="twins-map-${flow}"></div><div class="chart tall" id="twins-${flow}"></div></div></div>`).firstElementChild;
-  root.append(panel);
-
-  loadWorld()
-    .then(() => panel.isConnected && zoomable(chart(panel.querySelector(`#twins-map-${flow}`), {
-      tooltip: { formatter: (p) => (p.data?.twin ? tip(p.data.twin) : p.data?.name === shapeId(data.reporter) ? `<b>${reporter}</b>` : "") },
-      visualMap: {
-        min: 0, max: 1, orient: "horizontal", left: "center", bottom: 0, itemWidth: 10, itemHeight: 90,
-        text: [t("More similar"), t("Less similar")], textStyle: { color: css("--muted"), fontSize: 10 },
-        inRange: { color: ["#eaf2f7", "#7bb5b4", css("--accent")] },
-      },
-      series: [{
-        type: "map", map: "world", selectedMode: false, left: 0, right: 0, top: 0, bottom: 34,
-        itemStyle: { areaColor: css("--land"), borderColor: css("--border"), borderWidth: 0.6 },
-        emphasis: { label: { show: false }, itemStyle: { areaColor: css("--sold") } },
-        data: [
-          ...data.similar.map((s) => ({ name: shapeId(s.countryCode), value: ranks.get(s.similarity), twin: data.closest.find((c) => c.countryCode === s.countryCode) ?? s })),
-          { name: shapeId(data.reporter), itemStyle: { areaColor: css("--warn") }, twin: null },
-        ],
-      }],
-    }), "series").on("click", (p) => p.data?.twin && (location.hash = `#/country/${p.data.twin.countryCode}`)))
-    .catch(() => panel.querySelector(`#twins-map-${flow}`).remove());
-
-  const part = (i) => closest.map((s) => s.shared[i]?.contribution ?? 0);
-  chart(panel.querySelector(`#twins-${flow}`), {
-    grid: { left: 110, right: 30, top: 20, bottom: 30 },
-    tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, formatter: ([p]) => tip(closest[p.dataIndex]) },
-    xAxis: { ...axis(), type: "value", min: 0, max: 1 },
-    yAxis: { ...axis(), type: "category", data: closest.map((s) => s.countryName), axisLabel: { color: css("--muted"), width: 100, overflow: "truncate" } },
-    series: [
-      ...SHARED_COLORS.map((color, i) => ({
-        type: "bar", stack: "score", data: part(i), itemStyle: { color: css(color) },
-        label: i ? { show: false } : { show: true, position: "insideLeft", color: "#fff", fontSize: 10,
-          formatter: (p) => p.value * (panel.querySelector(`#twins-${flow}`).clientWidth - 140) >= 44 ? closest[p.dataIndex].shared[0]?.productCode ?? "" : "" },
-      })),
-      {
-        type: "bar", stack: "score", data: closest.map((s, n) => Math.max(0, s.similarity - SHARED_COLORS.reduce((a, _, i) => a + part(i)[n], 0))),
-        itemStyle: { color: css("--line") },
-        label: { show: true, position: "right", color: css("--ink"), formatter: (p) => index(closest[p.dataIndex].similarity) },
-      },
-    ],
-  }).on("click", (p) => (location.hash = `#/country/${closest[p.dataIndex].countryCode}`));
 }
