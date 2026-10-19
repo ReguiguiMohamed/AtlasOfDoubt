@@ -359,7 +359,7 @@ export default async function product(root, [code], params) {
       <form class="controls">
         <label>${t("Year")} <select name="year">${recorded
           .map((y) => `<option ${y.year === current.year ? "selected" : ""}>${y.year}</option>`).reverse().join("")}</select></label>
-        <a href="#/scenario?${query({ mode: "product", code, year: current.year })}"><button type="button" class="primary">${t("Run a disruption scenario")}</button></a>
+        <a href="#/scenario?${query({ code, year: current.year })}"><button type="button" class="primary">${t("Run a disruption scenario")}</button></a>
         <a href="#/routes?${query({ code, year: current.year })}">${t("Sea routes")}</a>
       </form>
     </div>

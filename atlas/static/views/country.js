@@ -42,7 +42,7 @@ export default async function country(root, [code], params) {
       <form class="controls">
         <label>${t("Year")} <select name="year">${recorded
           .map((y) => `<option ${y.year === data.year ? "selected" : ""}>${y.year}</option>`).reverse().join("")}</select></label>
-        <a href="#/scenario?${query({ mode: "country", suppliers: code, year: data.year, reduction: 100 })}"><button type="button" class="primary">${t("Simulate losing this supplier")}</button></a>
+        <a href="#/scenario?${query({ suppliers: code, year: data.year })}"><button type="button" class="primary">${t("Simulate losing this supplier")}</button></a>
       </form>
     </div>
     <div class="kpis">

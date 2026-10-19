@@ -203,10 +203,8 @@ export default async function seaRoutes(root, _, params) {
     selected = item;
     history.replaceState(null, "", link({ select: item.id }));
     map?.setOption(mapOption());
-    const suppliers = item.countries.filter((c) => c.isoCode).map((c) => c.countryCode);
-    const scenario = `#/scenario?${query({
-      mode: code ? "product" : "country", code, year: data.year, reduction: 100, suppliers: suppliers.join(","),
-    })}`;
+    const strait = item.path === undefined;
+    const scenario = `#/scenario?${query({ code, year: data.year, [strait ? "chokepoints" : "regions"]: item.id })}`;
     detail.querySelector("#title").textContent = t(item.name);
     detail.querySelector("#lane").textContent = item.path !== undefined
       ? t("Modelled lane: {via}.", { via: via(item) })
@@ -216,8 +214,8 @@ export default async function seaRoutes(root, _, params) {
       ${kpi(t("Share of imports"), pct(item.share))}
       ${kpi(t("Countries"), count(item.countries.length))}
       <div class="kpi"><span class="label">${t("Products")}</span><strong id="touched">…</strong></div>`;
-    detail.querySelector("#simulate").innerHTML = suppliers.length
-      ? `<a href="${scenario}"><button type="button" class="primary">${t("Simulate a closure")}</button></a>` : "";
+    detail.querySelector("#simulate").innerHTML = item.countries.length
+      ? `<a href="${scenario}"><button type="button" class="primary">${t(strait ? "Close this strait" : "Shut the ports of this region")}</button></a>` : "";
     trend.setOption({
       series: [
         { name: t("Imports"), type: "bar", data: item.years.map((y) => y.valueUsd), itemStyle: { color: css("--accent-2") }, tooltip: { valueFormatter: usd } },
@@ -229,14 +227,14 @@ export default async function seaRoutes(root, _, params) {
     exposed.setData([]);
 
     const touched = detail.querySelector("#touched");
-    if (!suppliers.length) {
+    if (!item.countries.length) {
       touched.textContent = "0";
       return;
     }
     const ticket = ++asked;
     const preview = await api("/scenarios/preview", {
       method: "POST",
-      body: JSON.stringify({ snapshot: state.snapshot._id, reporter: state.reporter.countryCode, year: data.year, mode: "country", suppliers, reduction: 1 }),
+      body: JSON.stringify({ snapshot: state.snapshot._id, reporter: state.reporter.countryCode, year: data.year, regions: item.routes ?? [item.id], reduction: "1" }),
     });
     if (ticket !== asked || !detail.isConnected) return;
     const products = preview.result.products.filter((p) => p.productCode.startsWith(code));
