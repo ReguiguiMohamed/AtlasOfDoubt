@@ -96,7 +96,7 @@ main { max-width: 1240px; margin: 0 auto; padding: 2.5rem 2rem 1.5rem; }
 }
 .panel > p { color: var(--muted); margin-top: 0; max-width: 80ch; }
 
-.grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.grid { display: grid; gap: 1.5rem; grid-template-columns: minmax(0, 1fr); }
 .grid > .panel { margin-bottom: 0; }
 .grid > *, main > section { min-width: 0; }
 
@@ -140,7 +140,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .kpi .note { font-size: 0.78rem; color: var(--muted); }
 .kpi.alert strong, .kpi.alert .note { color: var(--warn); }
 
-.chart { position: relative; width: 100%; height: 340px; overflow: hidden; }
+.chart { position: relative; width: 100%; height: 400px; overflow: hidden; }
 .chart .chart-save { position: absolute; top: 0; right: 4px; width: 96px; min-height: 40px; padding: 0.3rem 0.5rem; font-size: 0.75rem; }
 .chart-save:hover { background: var(--accent-soft); border-color: var(--accent-2); }
 .chart.tall { height: 480px; }
@@ -317,7 +317,6 @@ dl.facts dd { margin: 0; word-break: break-word; }
   output { white-space: nowrap; }
   .segmented { display: flex; flex-wrap: wrap; }
   .segmented a { flex: 1; text-align: center; padding: 0.5rem 0.75rem; }
-  .grid { grid-template-columns: minmax(0, 1fr); }
   .verdict { padding: 1.1rem; }
   .verdict h2 { font-size: 1.8rem; }
   .chart.tall { height: 380px; }
@@ -351,7 +350,6 @@ dl.facts dd { margin: 0; word-break: break-word; }
   .chart-save { display: none; }
   main { max-width: none; padding: 1rem 0 0; }
   .foot { padding: 1rem 0 0; }
-  .grid { grid-template-columns: minmax(0, 1fr); }
   .panel { border: 0; padding: 0; }
   .verdict { background: none; color: var(--ink); padding: 0; }
   .verdict .terms, .verdict .story, .verdict b { color: var(--ink); }
