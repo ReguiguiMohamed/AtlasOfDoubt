@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from atlas.metrics import merge, scenario, summarize, with_shares
+from atlas.metrics import disruption, merge, summarize, with_shares
 
 
 def supplier(code, value):
@@ -13,13 +13,30 @@ ABC = [supplier(1, 60_000_000), supplier(2, 30_000_000), supplier(3, 10_000_000)
 
 
 def test_blueprint_example():
-    result = scenario(ABC, [1], Decimal("0.5"))
-    assert result["affectedUsd"] == Decimal(30_000_000)
+    result = disruption(ABC, {1: "embargo"}, Decimal("0.5"))
+    assert result["affectedUsd"] == result["strandedUsd"] == result["gapUsd"] == Decimal(30_000_000)
+    assert result["reroutedUsd"] == result["replacedUsd"] == 0
     assert result["exposureShare"] == Decimal("0.3")
-    assert result["remainingUsd"] == Decimal(70_000_000)
-    assert result["remaining"]["topSupplier"]["share"] == Decimal(30) / Decimal(70)
-    a = result["suppliers"][0]
-    assert (a["selected"], a["baselineShare"], a["remainingUsd"]) == (True, Decimal("0.6"), Decimal(30_000_000))
+    assert result["remainingHhi"] == 2 * (Decimal(3) / 7) ** 2 + (Decimal(1) / 7) ** 2
+
+
+def test_a_rerouted_supplier_arrives_late_and_is_never_lost():
+    result = disruption(ABC, {1: "rerouted", 3: "cutOff"}, Decimal(1))
+    assert (result["affectedUsd"], result["reroutedUsd"], result["strandedUsd"]) == (70_000_000, 60_000_000, 10_000_000)
+    assert abs(result["remainingHhi"] - Decimal(5) / 9) < Decimal("1e-20")
+
+
+@pytest.mark.parametrize(("headroom", "replaced"), [(20_000_000, 20_000_000), (90_000_000, 60_000_000)])
+def test_untouched_exporters_replace_up_to_their_headroom(headroom, replaced):
+    result = disruption(ABC, {1: "embargo"}, Decimal(1), Decimal(headroom))
+    assert result["replacedUsd"] == replaced
+    assert result["gapUsd"] == 60_000_000 - replaced
+
+
+def test_a_short_shock_scales_values_but_not_shares():
+    result = disruption(ABC, {1: "embargo"}, Decimal(1), Decimal(20_000_000), Decimal("0.25"))
+    assert (result["totalUsd"], result["affectedUsd"], result["gapUsd"]) == (25_000_000, 15_000_000, 10_000_000)
+    assert result["exposureShare"] == Decimal("0.6")
 
 
 def test_baseline_measures():
@@ -53,33 +70,31 @@ def test_no_recorded_imports_gives_unavailable_measures():
 
 
 def test_zero_percent_disruption_changes_nothing():
-    result = scenario(ABC, [1, 2], Decimal(0))
+    result = disruption(ABC, {1: "embargo", 2: "region"}, Decimal(0))
     assert result["affectedUsd"] == 0
-    assert result["remaining"] == result["baseline"]
+    assert result["remainingHhi"] == result["baselineHhi"]
 
 
 def test_full_disruption_of_all_suppliers():
-    result = scenario(ABC, [1, 2, 3], Decimal(1))
+    result = disruption(ABC, {1: "embargo", 2: "embargo", 3: "region"}, Decimal(1))
     assert result["exposureShare"] == 1
-    assert result["remainingUsd"] == 0
-    assert result["remaining"]["hhi"] is None
-    assert all(s["remainingShare"] is None for s in result["suppliers"])
+    assert result["remainingHhi"] is None
 
 
 def test_absent_supplier_affects_nothing():
-    assert scenario(ABC, [99], Decimal("0.5"))["affectedUsd"] == 0
+    assert disruption(ABC, {99: "embargo"}, Decimal("0.5"))["affectedUsd"] == 0
 
 
-def test_scenario_on_empty_product():
-    result = scenario([], [1], Decimal(1))
+def test_disruption_of_an_empty_product():
+    result = disruption([], {1: "embargo"}, Decimal(1))
     assert result["affectedUsd"] == 0
     assert result["exposureShare"] is None
 
 
-@pytest.mark.parametrize("reduction", [Decimal("-0.1"), Decimal("1.01")])
-def test_reduction_outside_range_is_rejected(reduction):
+@pytest.mark.parametrize("severity", [Decimal("-0.1"), Decimal("1.01")])
+def test_severity_outside_range_is_rejected(severity):
     with pytest.raises(ValueError):
-        scenario(ABC, [1], reduction)
+        disruption(ABC, {1: "embargo"}, severity)
 
 
 def test_group_recomputes_shares_from_summed_values():

@@ -118,6 +118,9 @@ LANES = [
     ("iberia", "west-africa", [[-11, 30.6], [-14, 27.5], [-17.6, 21], [-18, 15], [-17.8, 12.5], [-13.5, 7], [-8, 4.1]]),
     ("iberia", "south-atlantic", [[-12.5, 31], [-19, 25], [-21, 15], [-30, 0], [-34.4, -8], [-39.5, -20], [-41, -23], [-43, -23.7]]),
     ("west-africa", "cape", [[3, 0], [8, -8], [10, -17], [13, -28]]),
+    ("cape", "iberia", [[5, -20], [-10, 0], [-20, 15], [-20, 27]]),
+    ("ceylon", "cape", [[65, -10], [50, -28], [35, -36]]),
+    ("pacific-south-america", "south-atlantic", [[-80, -30], [-78, -50], [-67, -57.5], [-60, -55], [-55, -45], [-50, -35]]),
     ("cape", "east-africa", [[26, -35], [32, -31.5], [36, -25], [40.5, -18], [42, -11], [41, -6]]),
     ("east-africa", "aden", [[48.5, 3]]),
     ("oceania", "ceylon", [[150.8, -37.8], [146.5, -39.6], [140, -39.3], [115, -36], [105, -12]]),
@@ -152,20 +155,20 @@ for start, end, waypoints in LANES:
     GRAPH.setdefault(end, []).append((start, length, waypoints[::-1]))
 
 
-def shortest(origin, destination):
-    """Places and drawn line of the shortest lane path between two places."""
-    queue, seen = [(0, origin, [origin], [PLACES[origin]])], set()
+def shortest(origin, destination, closed=()):
+    """Length, places and drawn line of the shortest lane path between two places, None when closed places cut every path."""
+    queue, seen = [(0, origin, [origin], [PLACES[origin]])], set(closed)
     while queue:
         length, place, places, line = heapq.heappop(queue)
         if place == destination:
-            return places, line
+            return length, places, line
         if place in seen:
             continue
         seen.add(place)
         for neighbour, step, waypoints in GRAPH[place]:
             if neighbour not in seen:
                 heapq.heappush(queue, (length + step, neighbour, places + [neighbour], line + waypoints + [PLACES[neighbour]]))
-    raise ValueError(f"no lane from {origin} to {destination}")
+    return None
 
 
 @lru_cache
@@ -179,9 +182,9 @@ def plan(reporter_iso):
         if region["id"] == home:
             via, path = [], None
         else:
-            places, path = shortest(region["id"], home)
+            length, places, path = shortest(region["id"], home)
             via = [p for p in places if p in CHOKEPOINTS]
-        routes.append({"id": region["id"], "name": region["name"], "via": via, "path": path})
+        routes.append({"id": region["id"], "name": region["name"], "via": via, "path": path, "km": length if path else 0})
     return routes
 
 
@@ -200,3 +203,28 @@ def by_route(suppliers):
 
 def through(routes, chokepoint):
     return [r["id"] for r in routes if chokepoint in r["via"]]
+
+
+# A container ship's usual 14 knots.
+KM_PER_DAY = 14 * 1.852 * 24
+
+
+@lru_cache
+def detours(reporter_iso, closed):
+    """For each route through a closed chokepoint, its next shortest lane or None when the closure cuts it off.
+
+    closed is a sorted tuple of chokepoint ids.
+    """
+    home = REGION_OF.get(reporter_iso)
+    found = {}
+    for r in plan(reporter_iso):
+        if not set(r["via"]) & set(closed):
+            continue
+        other = shortest(r["id"], home, closed)
+        found[r["id"]] = other and {
+            "path": other[2],
+            "via": [p for p in other[1] if p in CHOKEPOINTS],
+            "extraKm": other[0] - r["km"],
+            "extraDays": (other[0] - r["km"]) / KM_PER_DAY,
+        }
+    return found

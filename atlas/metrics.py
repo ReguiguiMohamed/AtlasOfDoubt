@@ -7,7 +7,7 @@ dict with at least countryCode, countryName and valueUsd (a Decimal).
 
 from decimal import Decimal
 
-CALCULATION_VERSION = "2"
+CALCULATION_VERSION = "3"
 
 ZERO = Decimal(0)
 
@@ -80,41 +80,35 @@ def merge(supplier_lists):
     return list(merged.values())
 
 
-def scenario(suppliers, selected, reduction):
-    """Cut the selected suppliers by `reduction` (0 to 1), leave the rest unchanged.
+def disruption(suppliers, causes, severity, headroom=ZERO, period=Decimal(1)):
+    """One product's imports under a shock that hits the suppliers in `causes` by `severity` (0 to 1).
 
-    No replacement and no price response are assumed. The affected value is
-    historical import value exposed under the scenario, not a forecast.
+    A supplier rerouted round a closed strait still delivers, only later. The
+    rest of the value hit is stranded, and untouched exporters replace it up
+    to `headroom`, a yearly value. Every value is scaled by `period`, the share
+    of a year the shock lasts. Prices do not respond.
     """
-    if not ZERO <= reduction <= 1:
-        raise ValueError("reduction must be between 0 and 1")
-    selected = set(selected)
+    if not ZERO <= severity <= 1:
+        raise ValueError("severity must be between 0 and 1")
+    baseline = total(suppliers)
+    affected = severity * total(s for s in suppliers if s["countryCode"] in causes)
+    rerouted = severity * total(s for s in suppliers if causes.get(s["countryCode"]) == "rerouted")
+    stranded = affected - rerouted
+    replaced = min(stranded, headroom)
     remaining = [
-        {**s, "valueUsd": s["valueUsd"] * (1 - reduction)} if s["countryCode"] in selected else s
+        {**s, "valueUsd": s["valueUsd"] * (1 - severity)} if causes.get(s["countryCode"], "rerouted") != "rerouted" else s
         for s in suppliers
     ]
-    baseline = total(suppliers)
-    affected = reduction * total(s for s in suppliers if s["countryCode"] in selected)
-    after = {s["countryCode"]: s for s in with_shares(remaining)}
     return {
-        "baseline": summarize(suppliers),
-        "affectedUsd": affected,
+        "totalUsd": baseline * period,
+        "affectedUsd": affected * period,
+        "reroutedUsd": rerouted * period,
+        "strandedUsd": stranded * period,
+        "replacedUsd": replaced * period,
+        "gapUsd": (stranded - replaced) * period,
         "exposureShare": affected / baseline if baseline else None,
-        "remainingUsd": baseline - affected,
-        "remaining": summarize(remaining),
-        "suppliers": [
-            {
-                "countryCode": s["countryCode"],
-                "countryName": s["countryName"],
-                "isoCode": s.get("isoCode"),
-                "selected": s["countryCode"] in selected,
-                "baselineUsd": s["valueUsd"],
-                "baselineShare": s["share"],
-                "remainingUsd": after[s["countryCode"]]["valueUsd"],
-                "remainingShare": after[s["countryCode"]]["share"],
-            }
-            for s in with_shares(suppliers)
-        ],
+        "baselineHhi": summarize(suppliers)["hhi"],
+        "remainingHhi": summarize(remaining)["hhi"],
     }
 
 

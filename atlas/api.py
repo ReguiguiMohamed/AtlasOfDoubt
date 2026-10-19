@@ -17,6 +17,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
@@ -24,7 +25,7 @@ from bson import ObjectId
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pymongo.database import Database
 
 from atlas import graph, materialize, metrics, routes, twins
@@ -547,6 +548,36 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
     }
 
 
+# A generation never changes once built, so moving a slider on one scope reads these sums once.
+@lru_cache(maxsize=64)
+def supplier_sums(db, generation, years, code):
+    match = {"generationId": generation, "year": {"$in": list(years)}, "imports": {"$exists": True}}
+    if code:
+        match["productCode"] = {"$regex": f"^{code}"}
+    return [
+        (r["_id"]["year"], r["_id"]["country"], r["valueUsd"])
+        for r in db.country_product_years.aggregate([
+            {"$match": match},
+            {"$unwind": "$imports.suppliers"},
+            {"$group": {"_id": {"year": "$year", "country": "$imports.suppliers.countryCode"},
+                        "valueUsd": {"$sum": "$imports.suppliers.valueUsd"}}},
+        ])
+    ]
+
+
+def supplied(db, snapshot, generation, years, code=None):
+    """Each year's suppliers, their value summed over the products under code or over every product."""
+    names = names_of(snapshot)
+    by_year = {y: [] for y in years}
+    for year, partner, value in supplier_sums(db, generation, tuple(years), code):
+        country = names[partner]
+        by_year[year].append({
+            "countryCode": country["countryCode"], "countryName": country["countryName"],
+            "isoCode": country["isoCode"], "valueUsd": value,
+        })
+    return by_year
+
+
 @app.get("/api/routes")
 def sea_routes(
     db: Db,
@@ -562,24 +593,9 @@ def sea_routes(
     """
     snapshot, home, generation, built = quick_scope(db, snapshot_id, reporter, year)
     year = checked_year(snapshot, year)
-    match = {"generationId": generation, "year": {"$in": built}, "imports": {"$exists": True}}
     if code:
         group_products(db, snapshot_id, code)
-        match["productCode"] = {"$regex": f"^{code}"}
-    names = names_of(snapshot)
-    supplied = db.country_product_years.aggregate([
-        {"$match": match},
-        {"$unwind": "$imports.suppliers"},
-        {"$group": {"_id": {"year": "$year", "country": "$imports.suppliers.countryCode"},
-                    "valueUsd": {"$sum": "$imports.suppliers.valueUsd"}}},
-    ])
-    by_year = {y: [] for y in built}
-    for r in supplied:
-        country = names[r["_id"]["country"]]
-        by_year[r["_id"]["year"]].append({
-            "countryCode": country["countryCode"], "countryName": country["countryName"],
-            "isoCode": country["isoCode"], "valueUsd": r["valueUsd"],
-        })
+    by_year = supplied(db, snapshot, generation, built, code)
     grouped = {y: routes.by_route(s) for y, s in by_year.items()}
     totals = {y: metrics.total(s) for y, s in by_year.items()}
     plan = routes.plan(home["isoCode"])
@@ -650,10 +666,70 @@ def exports(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | Non
 
 LIMITATIONS = [
     "Values are nominal current US dollars as published in BACI, with no inflation adjustment.",
-    "The affected value is historical import value exposed under this scenario. It is not a forecast of losses.",
-    "No replacement by other suppliers and no price response are assumed.",
+    "The value at risk is historical import value exposed under this scenario. It is not a forecast of losses.",
+    "Sea routes are modelled from each supplier's region, since BACI does not record transport. Detours assume ships at 14 knots.",
+    "Replacement comes only from the 25 largest world exporters of each product left untouched. They lend the spare share chosen of their exports, and the reporter wins its usual share of world trade in it. Prices do not respond.",
+    "A shock shorter than a year takes the same share of the yearly value, with no seasonality and no stocks.",
     "A missing flow means BACI recorded no positive flow. It is not a confirmed zero.",
     "Tonnes are never added across different products.",
+]
+
+# Real events and stress tests the scenario page loads in one click. Countries are ISO3 codes.
+PRESETS = [
+    {
+        "id": "red-sea-2024", "name": "Red Sea attacks", "when": "2024", "kind": "observed",
+        "chokepoints": ["bab", "suez"], "reduction": "0.5", "weeks": 52,
+        "fact": "Merchant traffic through the Suez Canal fell by more than half as ships went round the Cape.",
+        "source": "USNI News, 20 June 2024",
+        "url": "https://news.usni.org/2024/06/20/houthi-attacks-causing-more-damage-in-the-red-sea-merchant-traffic-through-suez-canal-down-more-than-50",
+    },
+    {
+        "id": "panama-drought-2023", "name": "Panama Canal drought", "when": "2023 to 2024", "kind": "observed",
+        "chokepoints": ["panama"], "reduction": "0.5", "weeks": 26,
+        "fact": "Low water in Gatun Lake cut daily transits from about 36 to 18 by February 2024.",
+        "source": "Waterways Journal, 15 November 2023",
+        "url": "https://www.waterwaysjournal.net/2023/11/15/panama-canal-restrictions-extended-deepened/",
+    },
+    {
+        "id": "hormuz-closure", "name": "Strait of Hormuz closed", "when": "stress test", "kind": "hypothetical",
+        "chokepoints": ["hormuz"], "reduction": "1", "weeks": 8,
+        "fact": "About 20 million barrels a day, a fifth of world petroleum use, passed Hormuz in 2024. The Gulf has no other sea exit.",
+        "source": "US EIA, June 2025",
+        "url": "https://www.eia.gov/todayinenergy/detail.php?id=65504",
+    },
+    {
+        "id": "malacca-closure", "name": "Strait of Malacca closed", "when": "stress test", "kind": "hypothetical",
+        "chokepoints": ["malacca"], "reduction": "1", "weeks": 4,
+        "fact": "The short way between the Indian Ocean and East Asia, and the busiest oil strait after Hormuz.",
+        "source": "US EIA, World Oil Transit Chokepoints",
+        "url": "https://www.eia.gov/international/analysis/special-topics/World_Oil_Transit_Chokepoints",
+    },
+    {
+        "id": "black-sea-grain-2022", "name": "Black Sea grain blockade", "when": "2022", "kind": "observed",
+        "suppliers": ["UKR"], "productCode": "10", "reduction": "1", "weeks": 21,
+        "fact": "Ukraine's ports stayed shut to grain from the invasion until the Black Sea Grain Initiative of July 2022.",
+        "source": "United Nations, Black Sea Grain Initiative",
+        "url": "https://www.un.org/en/black-sea-grain-initiative",
+    },
+    {
+        "id": "gallium-germanium-2023", "name": "China's gallium and germanium controls", "when": "2023", "kind": "observed",
+        "suppliers": ["CHN"], "productCode": "811292", "reduction": "1", "weeks": 52,
+        "fact": "China put the export of gallium and germanium, used in chips, under licence from August 2023.",
+        "source": "The China Project, 5 July 2023",
+        "url": "https://thechinaproject.com/2023/07/05/china-to-limit-the-export-of-two-critical-metals-used-in-chips/",
+    },
+    {
+        "id": "russia-embargo", "name": "Full embargo on Russia", "when": "stress test", "kind": "hypothetical",
+        "suppliers": ["RUS"], "reduction": "1", "weeks": 52,
+        "fact": "Every import from Russia stops for a year, energy and fertiliser included.",
+        "source": None, "url": None,
+    },
+    {
+        "id": "taiwan-chips", "name": "Taiwan chip supply stops", "when": "stress test", "kind": "hypothetical",
+        "suppliers": ["S19"], "productCode": "8542", "reduction": "1", "weeks": 12,
+        "fact": "Integrated circuits from Taiwan, which BACI lists as Other Asia, nes, stop for three months.",
+        "source": None, "url": None,
+    },
 ]
 
 
@@ -661,69 +737,147 @@ class ScenarioSpec(BaseModel):
     snapshot: str
     reporter: int
     year: int
-    mode: Literal["product", "country"]
     productCode: str | None = Field(None, pattern=CODE_PATTERN)
-    suppliers: list[int] = Field(min_length=1, max_length=300)
+    suppliers: list[int] = Field([], max_length=300)
+    regions: list[Literal[tuple(r["id"] for r in routes.REGIONS)]] = []
+    chokepoints: list[Literal[tuple(routes.CHOKEPOINTS)]] = []
     reduction: Decimal = Field(ge=0, le=1)
+    weeks: int = Field(52, ge=1, le=52)
+    spare: Decimal = Field(Decimal("0.1"), ge=0, le=1)
+    preset: Literal[tuple(p["id"] for p in PRESETS)] | None = None
+
+    @model_validator(mode="after")
+    def shocked(self):
+        if not (self.suppliers or self.regions or self.chokepoints):
+            raise ValueError("a scenario needs a supplier, a region or a chokepoint")
+        return self
 
 
 class ReportRequest(ScenarioSpec):
     title: str = Field(min_length=1, max_length=200)
 
 
-def run_scenario(db, snapshot, generation, spec):
+@app.get("/api/scenarios/presets")
+def presets(db: Db, snapshot_id: SnapshotId):
+    """The preset events with their countries as this snapshot's codes."""
+    codes = {c["isoCode"]: c["countryCode"] for c in ready_snapshot(db, snapshot_id)["countries"]}
+    return [{**p, "suppliers": [codes[iso] for iso in p.get("suppliers", []) if iso in codes]} for p in PRESETS]
+
+
+def run_scenario(db, snapshot, generation, built, spec):
     checked_year(snapshot, spec.year)
-    names = {c["countryCode"]: c["countryName"] for c in snapshot["countries"]}
+    names = names_of(snapshot)
     unknown = set(spec.suppliers) - names.keys()
     if unknown:
         raise HTTPException(422, f"unknown country codes {sorted(unknown)}")
-    if spec.mode == "product":
-        if spec.productCode is None:
-            raise HTTPException(422, "product mode needs a productCode")
+    description = None
+    if spec.productCode:
         products = group_products(db, spec.snapshot, spec.productCode)
-        suppliers = combined_suppliers(spec.productCode, cached(db, generation, spec.productCode, year=spec.year))
-        return {
-            "description": products[0]["description"] if len(spec.productCode) == 6 else f"{len(products)} products",
-            **metrics.scenario(suppliers, spec.suppliers, spec.reduction),
-        }
+        description = products[0]["description"] if len(spec.productCode) == 6 else f"{len(products)} products"
 
-    selected = set(spec.suppliers)
-    rows, total_imports, supplier_totals = [], metrics.ZERO, dict.fromkeys(selected, metrics.ZERO)
-    for doc in cached(db, generation, year=spec.year, imports={"$exists": True}):
+    home = names[spec.reporter]["isoCode"]
+    detours = routes.detours(home, tuple(sorted(set(spec.chokepoints))))
+    embargo, regions = set(spec.suppliers), set(spec.regions)
+
+    def state(region):
+        if region in regions:
+            return "region"
+        if region in detours:
+            return "rerouted" if detours[region] else "cutOff"
+        return None
+
+    def cause(code):
+        return "embargo" if code in embargo else state(routes.REGION_OF.get(names[code]["isoCode"]))
+
+    period = Decimal(spec.weeks) / 52
+    total, hit = metrics.ZERO, []
+    # Only the supplier values are read, since decoding every Decimal128 of a country's year takes seconds.
+    found = db.country_product_years.find(
+        {"generationId": generation, "year": spec.year, "imports": {"$exists": True}}
+        | ({"productCode": {"$regex": f"^{spec.productCode}"}} if spec.productCode else {}),
+        {"_id": 0, "productCode": 1, "description": 1} | {f"imports.suppliers.{k}": 1 for k in ("countryCode", "countryName", "valueUsd")},
+    )
+    for doc in found:
+        total += metrics.total(doc["imports"]["suppliers"])
+        causes = {s["countryCode"]: c for s in doc["imports"]["suppliers"] if (c := cause(s["countryCode"]))}
+        if causes:
+            hit.append((doc, causes))
+    world = {
+        w["productCode"]: w
+        for w in db.world_product_years.find(
+            {"snapshotId": spec.snapshot, "year": spec.year, "productCode": {"$in": [d["productCode"] for d, _ in hit]}},
+            {"productCode": 1, "totalUsd": 1, "topExporters": 1},
+        )
+    }
+
+    rows, by_supplier = [], {}
+    for doc, causes in hit:
         suppliers = doc["imports"]["suppliers"]
-        total_imports += metrics.total(suppliers)
-        hit = [s for s in suppliers if s["countryCode"] in selected]
-        if not hit:
-            continue
-        for s in hit:
-            supplier_totals[s["countryCode"]] += s["valueUsd"]
-        result = metrics.scenario(suppliers, selected, spec.reduction)
+        product = world.get(doc["productCode"], {"totalUsd": metrics.ZERO, "topExporters": []})
+        free = [e for e in product["topExporters"] if e["countryCode"] != spec.reporter and not cause(e["countryCode"])]
+        # Every buyer bids for the same spare output, so the reporter gets its usual share of world trade in it.
+        share = metrics.total(suppliers) / product["totalUsd"] if product["totalUsd"] else metrics.ZERO
         rows.append({
             "productCode": doc["productCode"],
             "description": doc["description"],
-            "totalUsd": result["baseline"]["totalUsd"],
-            "affectedUsd": result["affectedUsd"],
-            "exposureShare": result["exposureShare"],
-            "baselineHhi": result["baseline"]["hhi"],
-            "remainingHhi": result["remaining"]["hhi"],
+            **metrics.disruption(suppliers, causes, spec.reduction, spec.spare * share * metrics.total(free), period),
+            "alternatives": [names[e["countryCode"]]["isoCode"] for e in free[:3]],
         })
-    rows.sort(key=lambda r: r["affectedUsd"], reverse=True)
-    affected = sum((r["affectedUsd"] for r in rows), metrics.ZERO)
+        for s in suppliers:
+            if s["countryCode"] in causes:
+                entry = by_supplier.setdefault(s["countryCode"], {
+                    **{k: names[s["countryCode"]][k] for k in ("countryCode", "countryName", "isoCode")},
+                    "cause": causes[s["countryCode"]], "valueUsd": metrics.ZERO,
+                })
+                entry["valueUsd"] += s["valueUsd"] * period
+    rows.sort(key=lambda r: (r["gapUsd"], r["affectedUsd"]), reverse=True)
+    suppliers = sorted(by_supplier.values(), key=lambda s: s["valueUsd"], reverse=True)
+    at_risk = {}
+    for s in suppliers:
+        s["affectedUsd"] = s["valueUsd"] * spec.reduction
+        region = routes.REGION_OF.get(s["isoCode"])
+        at_risk[region] = at_risk.get(region, metrics.ZERO) + s["affectedUsd"]
+
+    sums = {k: sum((r[k] for r in rows), metrics.ZERO) for k in ("affectedUsd", "reroutedUsd", "strandedUsd", "replacedUsd", "gapUsd")}
+    late = [(float(at_risk.get(r, 0)), d["extraDays"]) for r, d in detours.items() if d]
+    weight = sum(v for v, _ in late)
+
+    timeline = []
+    for y, year_suppliers in supplied(db, snapshot, generation, built, spec.productCode).items():
+        hits = [(s["valueUsd"], cause(s["countryCode"])) for s in year_suppliers]
+        timeline.append({
+            "year": y,
+            "totalUsd": metrics.total(year_suppliers) * period,
+            "affectedUsd": spec.reduction * period * sum((v for v, c in hits if c), metrics.ZERO),
+            "strandedUsd": spec.reduction * period * sum((v for v, c in hits if c and c != "rerouted"), metrics.ZERO),
+        })
+
     return {
-        "totalImportsUsd": total_imports,
-        "affectedUsd": affected,
-        "exposureShare": affected / total_imports if total_imports else None,
-        "suppliers": [
-            {"countryCode": code, "countryName": names[code], "valueUsd": value} for code, value in supplier_totals.items()
+        "description": description,
+        "totalImportsUsd": total * period,
+        **sums,
+        "exposureShare": sums["affectedUsd"] / (total * period) if total else None,
+        "gapShare": sums["gapUsd"] / (total * period) if total else None,
+        "delayDays": sum(v * d for v, d in late) / weight if weight else None,
+        "home": next((r["hub"] for r in routes.REGIONS if r["id"] == routes.REGION_OF.get(home)), None),
+        "closed": [{"id": c, "name": routes.CHOKEPOINTS[c]["name"], "at": routes.CHOKEPOINTS[c]["at"]} for c in sorted(set(spec.chokepoints))],
+        "routes": [
+            {
+                "id": r["id"], "name": r["name"], "via": r["via"], "path": r["path"],
+                "affectedUsd": at_risk.get(r["id"], metrics.ZERO), "state": state(r["id"]), "detour": detours.get(r["id"]),
+            }
+            for r in routes.plan(home)
         ],
+        "suppliers": suppliers,
         "products": rows,
+        "timeline": timeline,
     }
 
 
 @app.post("/api/scenarios/preview")
 def preview(db: Db, spec: ScenarioSpec):
-    snapshot, _, generation = scope(db, spec.snapshot, spec.reporter, [spec.year])
-    result = run_scenario(db, snapshot, generation, spec)
+    snapshot, _, generation, built = quick_scope(db, spec.snapshot, spec.reporter, spec.year)
+    result = run_scenario(db, snapshot, generation, built, spec)
     return {"spec": spec.model_dump(), "calculationVersion": metrics.CALCULATION_VERSION, "result": result}
 
 
@@ -743,8 +897,8 @@ def throttle(saves, client):
 @app.post("/api/reports", status_code=201)
 def create_report(db: Db, request: ReportRequest, http: Request):
     throttle(http.app.state.saves, http.client.host if http.client else "")
-    snapshot, reporter, generation = scope(db, request.snapshot, request.reporter, [request.year])
-    result = run_scenario(db, snapshot, generation, request)
+    snapshot, reporter, generation, built = quick_scope(db, request.snapshot, request.reporter, request.year)
+    result = run_scenario(db, snapshot, generation, built, request)
     report = {
         "title": request.title,
         "createdAt": datetime.now(timezone.utc),
@@ -767,26 +921,27 @@ def find_report(db, report_id):
 
 @app.get("/api/reports")
 def list_reports(db: Db, reporter: Reporter):
-    reports = db.reports.find({"reporter.countryCode": reporter}, {"title": 1, "createdAt": 1, "spec": 1}).sort("createdAt", -1)
+    reports = db.reports.find(
+        {"reporter.countryCode": reporter},
+        {"title": 1, "createdAt": 1, "spec": 1, "result.affectedUsd": 1, "result.gapUsd": 1, "result.delayDays": 1},
+    ).sort("createdAt", -1)
     return [{**r, "_id": str(r["_id"])} for r in reports]
 
 
-CSV_COLUMNS = {
-    "product": ["countryCode", "countryName", "isoCode", "selected", "baselineUsd", "baselineShare", "remainingUsd", "remainingShare"],
-    "country": ["productCode", "description", "totalUsd", "affectedUsd", "exposureShare", "baselineHhi", "remainingHhi"],
-}
+CSV_COLUMNS = [
+    "productCode", "description", "totalUsd", "affectedUsd", "reroutedUsd", "strandedUsd", "replacedUsd", "gapUsd",
+    "exposureShare", "baselineHhi", "remainingHhi",
+]
 
 
 @app.get("/api/reports/{report_id}.csv")
 def report_csv(db: Db, report_id: str):
     """The report's result table. Provenance and limitations live in the report page."""
     report = find_report(db, report_id)
-    mode = report["spec"]["mode"]
-    rows = report["result"]["suppliers" if mode == "product" else "products"]
     out = io.StringIO()
-    writer = csv.DictWriter(out, CSV_COLUMNS[mode], extrasaction="ignore", lineterminator="\n")
+    writer = csv.DictWriter(out, CSV_COLUMNS, extrasaction="ignore", lineterminator="\n")
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(report["result"]["products"])
     return Response(
         out.getvalue(),
         media_type="text/csv",

@@ -124,31 +124,73 @@ def preview(api, **spec):
     return response.json()["result"]
 
 
-def test_product_scenario_follows_the_blueprint_rule(api):
-    result = preview(api, mode="product", productCode="010121", suppliers=[251], reduction=0.5)
-    assert result["affectedUsd"] == 30000
-    assert result["exposureShare"] == pytest.approx(0.3)
-    assert result["remainingUsd"] == 70000
-    assert [s["selected"] for s in result["suppliers"]] == [True, False, False]
-
-
-def test_country_scenario_ranks_products_and_never_adds_tonnes(api):
-    result = preview(api, mode="country", suppliers=[251], reduction=1)
-    assert [p["productCode"] for p in result["products"]] == ["010121", "310230"]
-    assert result["affectedUsd"] == 60000 + 2734
+# World exports of horses in 2012: France 160, Italy 30, the USA 10 and Tunisia 5 thousand USD, 205 in all.
+def test_an_embargo_strands_its_imports_and_untouched_exporters_fill_their_share(api):
+    result = preview(api, suppliers=[251], reduction=1)
+    horses, fertilizer = result["products"]
+    assert (horses["productCode"], fertilizer["productCode"]) == ("010121", "310230")
+    assert result["affectedUsd"] == result["strandedUsd"] == 60000 + 2734
+    assert horses["replacedUsd"] == pytest.approx(0.1 * (30000 + 10000) * 100000 / 205000)
+    assert horses["alternatives"] == ["ITA", "USA"]
+    assert fertilizer["gapUsd"] == 2734
     assert result["totalImportsUsd"] == 100000 + 2734
-    assert result["suppliers"] == [{"countryCode": 251, "countryName": "France", "valueUsd": 62734}]
+    assert result["suppliers"] == [
+        {"countryCode": 251, "countryName": "France", "isoCode": "FRA", "cause": "embargo", "valueUsd": 62734, "affectedUsd": 62734}
+    ]
     assert "quantityTonnes" not in str(result)
+
+
+def test_a_closed_strait_reroutes_what_has_another_lane_and_strands_the_rest(api):
+    late = preview(api, chokepoints=["gibraltar"], reduction=1)
+    assert (late["affectedUsd"], late["reroutedUsd"], late["gapUsd"]) == (10000, 10000, 0)
+    americas = {r["id"]: r for r in late["routes"]}["americas"]
+    assert americas["state"] == "rerouted"
+    assert "gibraltar" not in americas["detour"]["via"]
+    assert late["delayDays"] == americas["detour"]["extraDays"] > 0
+    assert late["closed"] == [{"id": "gibraltar", "name": "Strait of Gibraltar", "at": [-5.6, 35.88]}]
+    shut = preview(api, chokepoints=["gibraltar", "suez"], reduction=1)
+    assert shut["strandedUsd"] == 10000
+    assert {r["id"]: r["state"] for r in shut["routes"]}["americas"] == "cutOff"
+
+
+def test_a_regional_shutdown_hits_every_supplier_there_for_the_weeks_it_lasts(api):
+    result = preview(api, regions=["mediterranean"], reduction="0.5", weeks=13)
+    assert result["affectedUsd"] == pytest.approx((60000 + 30000 + 2734) * 0.5 / 4)
+    assert {s["isoCode"]: s["cause"] for s in result["suppliers"]} == {"FRA": "region", "ITA": "region"}
+    assert result["timeline"][0] == {
+        "year": 2012, "totalUsd": pytest.approx(102734 / 4),
+        "affectedUsd": pytest.approx(92734 * 0.5 / 4), "strandedUsd": pytest.approx(92734 * 0.5 / 4),
+    }
+
+
+def test_presets_name_the_countries_this_snapshot_has(two):
+    presets = {p["id"]: p for p in two.get("/api/scenarios/presets", params={"snapshot": two.snapshot}).json()}
+    assert presets["gallium-germanium-2023"]["suppliers"] == [CHINA]
+    assert presets["black-sea-grain-2022"]["suppliers"] == []
+    assert all(p["url"] is None or p["url"].startswith("https://") for p in presets.values())
+
+
+@pytest.mark.parametrize("reporter", [TUNISIA, USA, 251, 380])
+def test_every_strait_preset_runs_for_every_country(api, reporter):
+    for p in api.get("/api/scenarios/presets", params={"snapshot": api.snapshot}).json():
+        if p.get("chokepoints"):
+            spec = {k: p[k] for k in ("chokepoints", "reduction", "weeks")}
+            assert api.post("/api/scenarios/preview", json={
+                "snapshot": api.snapshot, "reporter": reporter, "year": 2012, "preset": p["id"], **spec,
+            }).status_code == 200
 
 
 @pytest.mark.parametrize(
     "spec",
     [
-        {"mode": "product", "suppliers": [251], "reduction": 0.5},
-        {"mode": "product", "productCode": "010121", "suppliers": [251], "reduction": 1.5},
-        {"mode": "country", "suppliers": [], "reduction": 0.5},
-        {"mode": "country", "suppliers": [999], "reduction": 0.5},
-        {"mode": "country", "suppliers": [251], "reduction": 0.5, "reporter": 999},
+        {"reduction": 0.5},
+        {"productCode": "010121", "suppliers": [251], "reduction": 1.5},
+        {"suppliers": [999], "reduction": 0.5},
+        {"suppliers": [251], "reduction": 0.5, "reporter": 999},
+        {"chokepoints": ["nowhere"], "reduction": 0.5},
+        {"regions": ["atlantis"], "reduction": 0.5},
+        {"suppliers": [251], "reduction": 0.5, "weeks": 0},
+        {"suppliers": [251], "reduction": 0.5, "preset": "made-up"},
     ],
 )
 def test_scenario_rejects_bad_specs(api, spec):
@@ -156,8 +198,13 @@ def test_scenario_rejects_bad_specs(api, spec):
     assert api.post("/api/scenarios/preview", json=body).status_code == 422
 
 
+def test_a_scenario_on_a_missing_product_is_not_found(api):
+    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, "productCode": "8542", "suppliers": [251], "reduction": 1}
+    assert api.post("/api/scenarios/preview", json=body).status_code == 404
+
+
 def report(api, **spec):
-    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, "mode": "product", "productCode": "010121",
+    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, "productCode": "010121",
             "suppliers": [251], "reduction": 0.5, "title": "France halves", **spec}
     return api.post("/api/reports", json=body).json()["id"]
 
@@ -168,36 +215,40 @@ def test_report_ignores_numbers_sent_by_the_browser(api):
     assert saved["snapshot"]["archive"]["filename"] == "BACI_HS12_V202601.zip"
     assert saved["snapshot"]["manifest"]["layoutVersion"] == "3"
     assert saved["reporter"] == {"countryCode": TUNISIA, "countryName": "Tunisia", "isoCode": "TUN"}
-    assert saved["calculationVersion"] == "2"
+    assert saved["calculationVersion"] == "3"
+    assert saved["spec"]["weeks"] == 52
 
 
-def test_reports_are_listed_per_reporter(api):
+def test_reports_are_listed_per_reporter_with_their_headline(api):
     report(api)
-    assert len(api.get("/api/reports").json()) == 1
+    [listed] = api.get("/api/reports").json()
+    assert listed["result"] == {"affectedUsd": 30000, "gapUsd": pytest.approx(30000 - 0.1 * 40000 * 100000 / 205000), "delayDays": None}
     assert api.get("/api/reports", params={"reporter": USA}).json() == []
 
 
 def test_report_is_unchanged_after_another_snapshot_is_added(api, db, make_archive):
-    report_id = report(api, mode="country", suppliers=[251, 380], reduction=0.25, title="EU quarter cut")
+    report_id = report(api, productCode=None, suppliers=[251, 380], reduction=0.25, title="EU quarter cut")
     before = api.get(f"/api/reports/{report_id}").json()
     prepare(make_archive({2012: ["2012,251,788,010121,999,1"]}, release="209901"), db)
     assert len(api.get("/api/snapshots").json()) == 2
     assert api.get(f"/api/reports/{report_id}").json() == before
 
 
-def test_report_csv_exports_the_result_table(api):
-    response = api.get(f"/api/reports/{report(api)}.csv")
+def test_report_csv_exports_the_product_rows(api):
+    response = api.get(f"/api/reports/{report(api, productCode=None, reduction=1)}.csv")
     lines = response.text.splitlines()
     assert response.headers["content-type"].startswith("text/csv")
-    assert lines[0] == "countryCode,countryName,isoCode,selected,baselineUsd,baselineShare,remainingUsd,remainingShare"
-    assert lines[1].startswith("251,France,FRA,True,60000.000,0.6,30000.0000,")
-    assert len(lines) == 4
+    assert lines[0] == (
+        "productCode,description,totalUsd,affectedUsd,reroutedUsd,strandedUsd,replacedUsd,gapUsd,exposureShare,baselineHhi,remainingHhi"
+    )
+    assert lines[1].startswith('010121,"Horses: live, pure-bred breeding animals",100000')
+    assert len(lines) == 3
 
 
 def test_a_client_saves_a_limited_number_of_reports_an_hour(api, monkeypatch):
     from atlas import api as server
     monkeypatch.setattr(server, "REPORTS_PER_HOUR", 2)
-    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, "mode": "product", "productCode": "010121",
+    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, "productCode": "010121",
             "suppliers": [251], "reduction": 0.5, "title": "France halves"}
     assert [api.post("/api/reports", json=body).status_code for _ in range(3)] == [201, 201, 429]
     assert len(api.get("/api/reports").json()) == 2
@@ -353,6 +404,16 @@ def test_the_route_depends_on_the_reporter():
     assert routes.plan("ATA") == []
 
 
+def test_a_closed_strait_sends_each_route_round_the_next_lane_or_cuts_it_off():
+    red_sea = routes.detours("FRA", ("bab", "suez"))
+    assert "suez" not in red_sea["east-asia"]["via"]
+    assert red_sea["east-asia"]["extraDays"] > 10
+    assert red_sea["red-sea"] is None
+    assert routes.detours("IND", ("hormuz",))["gulf"] is None
+    assert routes.detours("USA", ("panama",))["pacific-south-america"]["extraKm"] > 5000
+    assert routes.detours("FRA", ()) == {}
+
+
 def later_year(db, snapshot_id, code, totalUsd, hhi):
     generation = materialize.ensure(db, db.snapshots.find_one({"_id": snapshot_id}), TUNISIA)
     doc = db.country_product_years.find_one({"generationId": generation, "productCode": code, "year": 2012}, {"_id": 0})
@@ -396,7 +457,7 @@ def figures(client, reporter):
     [row] = client.get("/api/overview", params={"reporter": reporter}).json()["rows"]
     exports = client.get("/api/exports", params={"reporter": reporter}).json()
     cut = client.post("/api/scenarios/preview", json={
-        "snapshot": client.snapshot, "reporter": reporter, "year": 2012, "mode": "country", "suppliers": [CHINA], "reduction": 0.5,
+        "snapshot": client.snapshot, "reporter": reporter, "year": 2012, "suppliers": [CHINA], "reduction": 0.5,
     }).json()["result"]
     return row["metrics"]["totalUsd"], exports["years"][0]["exportsUsd"], row["metrics"]["hhi"], cut["affectedUsd"]
 
