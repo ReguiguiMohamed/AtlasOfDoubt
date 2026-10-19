@@ -1,6 +1,7 @@
 import os
 import shutil
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -23,6 +24,16 @@ def api(db, make_archive):
         client.snapshot = snapshot["_id"]
         client.params = {"snapshot": snapshot["_id"], "reporter": TUNISIA}
         yield client
+
+
+def settled(client, path, **params):
+    """A page of every year once the background fill has built them all."""
+    for _ in range(100):
+        body = client.get(path, params=params).json()
+        if not body["filling"]:
+            return body
+        time.sleep(0.1)
+    raise AssertionError(f"{path} still filling")
 
 
 def test_unknown_snapshot_is_not_found(api):
@@ -70,7 +81,7 @@ def test_overview_rejects_a_year_outside_the_snapshot(api):
 
 
 def test_history_shows_missing_years_as_gaps(api):
-    history = api.get("/api/products/100119/history").json()
+    history = settled(api, "/api/products/100119/history")
     by_year = {y["year"]: y for y in history["years"]}
     assert len(by_year) == 13
     assert by_year[2012]["metrics"] is None
@@ -86,8 +97,8 @@ def test_history_of_a_group_sums_suppliers_before_shares(api):
 
 
 def test_history_carries_the_reporters_exports(api):
-    one = {y["year"]: y for y in api.get("/api/products/010121/history").json()["years"]}
-    group = {y["year"]: y for y in api.get("/api/products/01/history").json()["years"]}
+    one = {y["year"]: y for y in settled(api, "/api/products/010121/history")["years"]}
+    group = {y["year"]: y for y in settled(api, "/api/products/01/history")["years"]}
     assert one[2012]["exports"]["totalUsd"] == group[2012]["exports"]["totalUsd"] == 5000
     assert group[2012]["exports"]["rca"] == pytest.approx(one[2012]["exports"]["rca"])
     assert group[2012]["exports"]["rca"] == pytest.approx(1 / (205000 / 207734))
@@ -268,7 +279,7 @@ def test_a_missing_graph_or_twins_fails_only_its_own_panel(db, make_archive):
 
 
 def test_country_profile_sums_supplies_across_products(api):
-    profile = api.get("/api/countries/251", params={"year": 2012}).json()
+    profile = settled(api, "/api/countries/251", year=2012)
     assert profile["country"]["countryName"] == "France"
     assert [(p["productCode"], p["valueUsd"], p["share"], p["rank"]) for p in profile["products"]] == [
         ("010121", 60000, 0.6, 1),
@@ -293,7 +304,7 @@ def test_unknown_country_is_not_found(api):
 
 
 def test_routes_sum_countries_into_routes_and_chokepoints(api):
-    body = api.get("/api/routes", params={"year": 2012}).json()
+    body = settled(api, "/api/routes", year=2012)
     route = {r["id"]: r for r in body["routes"]}
     strait = {c["id"]: c for c in body["chokepoints"]}
     assert body["totalUsd"] == 102734
@@ -437,6 +448,38 @@ def test_a_first_visit_opens_on_the_first_and_last_years_and_fills_in_the_rest(d
     materialize.build(db, snapshot, TUNISIA, "whole")
     assert stored(db, generation) == stored(db, "whole")
 
+
+
+def test_a_cold_product_page_answers_with_the_first_and_last_years_while_the_rest_fill_in(api, monkeypatch):
+    gate, filled, fill = threading.Event(), threading.Event(), materialize.fill
+    monkeypatch.setattr(materialize, "fill", lambda *args: gate.wait() and (fill(*args), filled.set()))
+    first = api.get("/api/products/010121/history").json()
+    assert ([y["year"] for y in first["years"]], first["filling"]) == ([2012, 2024], True)
+    gate.set()
+    assert filled.wait(10)
+    whole = api.get("/api/products/010121/history").json()
+    assert (len(whole["years"]) > 2, whole["filling"]) == (True, False)
+
+
+def test_first_visits_build_two_years_at_once_and_queue_the_rest(monkeypatch):
+    running, peak, lock = 0, 0, threading.Lock()
+
+    def year(*args):
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        threading.Event().wait(0.05)
+        with lock:
+            running -= 1
+
+    monkeypatch.setattr(materialize, "build_year", year)
+    visits = [threading.Thread(target=materialize.build, args=(None, {"years": [2012, 2024]}, c, c)) for c in range(5)]
+    for t in visits:
+        t.start()
+    for t in visits:
+        t.join()
+    assert peak == 2
 
 def test_a_fill_that_stopped_is_taken_over_once_its_lease_expires(db, make_archive, monkeypatch):
     snapshot = db.snapshots.find_one({"_id": prepare(make_archive({**FLOWS, **NETWORK}), db)["_id"]})

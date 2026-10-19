@@ -106,6 +106,17 @@ def scope(db, snapshot_id, reporter, years=None):
     return snapshot, country, materialize.ensure(db, snapshot, reporter, years and [checked_year(snapshot, y) for y in years])
 
 
+def quick_scope(db, snapshot_id, reporter, year=None):
+    """scope for a page that charts every year but opens on the first, the last and the asked year.
+
+    The years readable so far come back too. The others follow once the background fill has built them.
+    """
+    snapshot = ready_snapshot(db, snapshot_id)
+    snapshot, country, generation = scope(db, snapshot_id, reporter, [min(snapshot["years"]), max(snapshot["years"]), year])
+    job = db.materializations.find_one({"generationId": generation}, {"years": 1}) or {}
+    return snapshot, country, generation, job.get("years", snapshot["years"])
+
+
 def checked_year(snapshot, year):
     if year is None:
         return max(snapshot["years"])
@@ -307,7 +318,7 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
     A group's RCA compares the reporter's summed exports of the group with the
     world's summed exports of it, as for one product.
     """
-    snapshot, _, generation = scope(db, snapshot_id, reporter)
+    snapshot, _, generation, built = quick_scope(db, snapshot_id, reporter)
     products = group_products(db, snapshot_id, code)
     by_year = {}
     for doc in cached(db, generation, code):
@@ -334,7 +345,7 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
         }
 
     years = []
-    for year in snapshot["years"]:
+    for year in built:
         docs = by_year.get(year, [])
         suppliers = combined_suppliers(code, docs)
         sold = [d["exports"] for d in docs if "exports" in d]
@@ -359,7 +370,7 @@ def history(db: Db, code: Code, snapshot_id: SnapshotId, reporter: Reporter):
         })
     return {
         "snapshot": snapshot_id, "reporter": reporter, "code": code, "products": products, "years": years,
-        "geography": geography(db, snapshot_id, reporter),
+        "filling": len(built) < len(snapshot["years"]), "geography": geography(db, snapshot_id, reporter),
     }
 
 
@@ -482,7 +493,7 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
 
     Rank is one plus the number of suppliers that sent more, so equal values share a rank.
     """
-    snapshot, home, generation = scope(db, snapshot_id, reporter)
+    snapshot, home, generation, built = quick_scope(db, snapshot_id, reporter, year)
     year = checked_year(snapshot, year)
     country = find_country(snapshot, country_code)
 
@@ -497,7 +508,7 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
     ])
     by_year = {r["_id"]: r for r in supplied}
     years = []
-    for y in snapshot["years"]:
+    for y in built:
         row, total = by_year.get(y), totals.get(y)
         sold = next((d["valueUsd"] for d in total["destinations"] if d["countryCode"] == country_code), None) if total else None
         years.append({
@@ -529,6 +540,7 @@ def country_profile(db: Db, country_code: int, snapshot_id: SnapshotId, reporter
     route = routes.route(home["isoCode"], country["isoCode"])
     return {
         "snapshot": snapshot_id, "reporter": home, "year": year, "country": country, "years": years, "products": products,
+        "filling": len(built) < len(snapshot["years"]),
         "geography": geography(db, snapshot_id, reporter).get(country_code),
         "route": {"id": route["id"], "name": route["name"], "via": [routes.CHOKEPOINTS[c]["name"] for c in route["via"]]}
         if route else None,
@@ -548,9 +560,9 @@ def sea_routes(
     A chokepoint carries the sum of the routes through it, so a country counts once
     per strait it passes and never twice on one strait.
     """
-    snapshot, home, generation = scope(db, snapshot_id, reporter)
+    snapshot, home, generation, built = quick_scope(db, snapshot_id, reporter, year)
     year = checked_year(snapshot, year)
-    match = {"generationId": generation, "imports": {"$exists": True}}
+    match = {"generationId": generation, "year": {"$in": built}, "imports": {"$exists": True}}
     if code:
         group_products(db, snapshot_id, code)
         match["productCode"] = {"$regex": f"^{code}"}
@@ -561,7 +573,7 @@ def sea_routes(
         {"$group": {"_id": {"year": "$year", "country": "$imports.suppliers.countryCode"},
                     "valueUsd": {"$sum": "$imports.suppliers.valueUsd"}}},
     ])
-    by_year = {y: [] for y in snapshot["years"]}
+    by_year = {y: [] for y in built}
     for r in supplied:
         country = names[r["_id"]["country"]]
         by_year[r["_id"]["year"]].append({
@@ -583,11 +595,12 @@ def sea_routes(
         return {
             **measure(route_ids, year),
             "countries": metrics.with_shares(suppliers),
-            "years": [measure(route_ids, y) for y in snapshot["years"]],
+            "years": [measure(route_ids, y) for y in built],
         }
 
     return {
         "snapshot": snapshot_id, "reporter": home, "year": year, "code": code, "totalUsd": totals[year],
+        "filling": len(built) < len(snapshot["years"]),
         "home": next((r["hub"] for r in routes.REGIONS if r["id"] == routes.REGION_OF.get(home["isoCode"])), None),
         "chokepoints": [
             {"id": c, "name": p["name"], "at": p["at"], "routes": routes.through(plan, c), **entry(routes.through(plan, c))}

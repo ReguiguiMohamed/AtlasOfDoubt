@@ -34,6 +34,7 @@ const FR = {
   "Map controls": "Commandes de la carte",
   "Browse pages": "Parcourir les pages",
   "Loading trade data...": "Chargement des données commerciales...",
+  "The other years are loading and appear here as soon as they are built.": "Les autres années se chargent et apparaissent ici dès qu'elles sont prêtes.",
   "Building the view of {country}: {seconds} s. A country's first visit takes up to 2 minutes, later visits open at once.":
     "Préparation de la vue de {country} : {seconds} s. La première visite d'un pays prend jusqu'à 2 minutes, les suivantes s'ouvrent aussitôt.",
   "All partner countries": "Tous les pays partenaires",

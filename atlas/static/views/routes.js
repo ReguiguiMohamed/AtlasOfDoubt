@@ -1,11 +1,13 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, css, esc, html, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, chart, count, css, esc, html, kpi, loadWorld, pct, pctColumn, query, scoped, shapeId, state, table, usd, usdColumn, whenFilled, zoomable } from "../lib.js";
 
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export default async function seaRoutes(root, _, params) {
   const code = params.get("code") ?? "";
-  const data = await api(`/routes?${scoped({ year: params.get("year"), code })}`);
+  const path = `/routes?${scoped({ year: params.get("year"), code })}`;
+  const data = await api(path);
+  whenFilled(root, path, data, () => seaRoutes(root, _, params));
   const reporter = esc(state.reporter.countryName);
   const strait = Object.fromEntries(data.chokepoints.map((c) => [c.id, c]));
   const items = [...data.chokepoints, ...data.routes];

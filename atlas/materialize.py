@@ -17,6 +17,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 
 import duckdb
@@ -26,17 +27,23 @@ from pymongo.errors import DuplicateKeyError
 from atlas import metrics
 from atlas.prepare import DATA
 
-CACHE_BYTES = 1_000_000_000
+# Uncompressed BSON, which WiredTiger stores in about half, so the VM keeps some 15 visited countries in 2 GB of disk.
+CACHE_BYTES = 4_000_000_000
 LEASE = timedelta(minutes=10)
 POLL = 0.5
 WORLD_ALTERNATIVES = 5
 INSERT_BATCH = 2000
 INSERT_THREADS = 4
 RECENT = 3
+# Two years build at once, so two first visits both move while the app stays within its memory cap.
+# Reads of countries already built never wait on this.
+BUILDS = threading.BoundedSemaphore(2)
+# Fills and the boot rewarm run in the background and take one slot at most, so a visitor's first build always has the other.
+FILLS = threading.BoundedSemaphore(1)
 WORLD_FIELDS = ("productCode", "year", "totalUsd", "sumSquares", "exporterCount", "unitValueUsdPerTonne", "prody")
 
 
-def ensure(db, snapshot, country, years=None, budget=CACHE_BYTES):
+def ensure(db, snapshot, country, years=None, budget=CACHE_BYTES, background=False):
     """Return the ready generation id for this snapshot and country that holds these years, or every year when none are given."""
     key = {"snapshotId": snapshot["_id"], "countryCode": country}
     quick = {min(snapshot["years"]), max(snapshot["years"])}
@@ -62,7 +69,9 @@ def ensure(db, snapshot, country, years=None, budget=CACHE_BYTES):
         if previous:
             db.country_product_years.delete_many({"generationId": previous["generationId"]})
         try:
-            build(db, snapshot, country, generation, quick if split else None)
+            # Holding the slot only while building, a rewarm waiting on a visitor's fill never blocks that fill.
+            with FILLS if background else nullcontext():
+                build(db, snapshot, country, generation, quick if split else None)
         except Exception as exc:
             db.materializations.update_one(
                 {**key, "generationId": generation},
@@ -91,7 +100,8 @@ def fill(db, snapshot, country, generation, years, budget):
     """Add the years a quick first build left out to its generation, then mark the job complete."""
     key = {"snapshotId": snapshot["_id"], "countryCode": country, "generationId": generation}
     try:
-        build(db, snapshot, country, generation, years)
+        with FILLS:
+            build(db, snapshot, country, generation, years)
     except Exception as exc:
         db.materializations.update_one(key, {"$set": {"status": "failed", "failure": str(exc)}, "$unset": {"leaseUntil": "", "years": ""}})
         db.country_product_years.delete_many({"generationId": generation})
@@ -144,7 +154,7 @@ def rewarm(db, snapshot, count=RECENT):
         if len(recent) == count:
             break
     for country in reversed(recent):
-        ensure(db, snapshot, country)
+        ensure(db, snapshot, country, background=True)
     return recent
 
 
@@ -154,7 +164,15 @@ def parquet(path, years):
 
 def build(db, snapshot, country, generation, years=None):
     """Write the country's documents of these years, or of every year, into the generation."""
-    years = set(years or snapshot["years"])
+    # A year's rows sit in Python lists until they are inserted. All 13 years of the USA at once
+    # filled a 2.5 GB container, while one year needs a few hundred MB.
+    for year in sorted(years or snapshot["years"]):
+        with BUILDS:
+            build_year(db, snapshot, country, generation, year)
+
+
+def build_year(db, snapshot, country, generation, year):
+    years = {year}
     root = DATA / snapshot["storage"]["path"]
     flow_files = parquet(root / "flows" / f"importer={country}", years)
     export_files = parquet(root / "exports" / f"country={country}", years)

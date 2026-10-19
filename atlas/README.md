@@ -97,8 +97,10 @@ The twin score is the inner product of two vectors, the Bhattacharyya coefficien
 
 - A first visit builds the country's view under one generation id, readable only once complete.
 - The first and last years come first, so the imports page opens while the other 11 fill in.
+- The product, partner and sea route pages chart every year. They open on those two years as well and redraw once the fill is done.
+- Two years build at once, and background fills take one of the two slots at most.
 - A second request during a build waits for it, and a build whose 10 minute lease expired is taken over.
-- Past 1 GB the least recently used views are dropped and rebuilt with the same figures.
+- Past 4 GB the least recently used views are dropped and rebuilt with the same figures.
 - A restart rebuilds the 3 countries visited last.
 - Decimal128 values are packed with integer arithmetic, since pymongo converts each of a country's 2.6 million decimals bit by bit in Python.
 

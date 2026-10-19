@@ -23,10 +23,17 @@ const KEEP = 40;
 
 function answer(path) {
   if (!answers.has(path)) {
-    const pending = request(path).catch((error) => {
-      if (answers.get(path) === pending) answers.delete(path);
-      throw error;
-    });
+    const pending = request(path).then(
+      (body) => {
+        // A country still building its other years answers differently in a few seconds.
+        if (body.filling && answers.get(path) === pending) answers.delete(path);
+        return body;
+      },
+      (error) => {
+        if (answers.get(path) === pending) answers.delete(path);
+        throw error;
+      },
+    );
     answers.set(path, pending);
     if (answers.size > KEEP) answers.delete(answers.keys().next().value);
   }
@@ -40,6 +47,22 @@ export const api = (path, options = {}) =>
 // One at a time, so pages loaded ahead never crowd the one being read.
 export async function preload(paths) {
   for (const path of paths) await answer(path).catch(() => {});
+}
+
+// A first visit opens on the first and last years while the background fill builds the others, then the view redraws with every year.
+export async function whenFilled(root, path, data, redraw) {
+  if (!data.filling) return;
+  root.prepend(html(`<p class="notice">${t("The other years are loading and appear here as soon as they are built.")}</p>`));
+  while (data.filling) {
+    await new Promise((done) => setTimeout(done, 3000));
+    if (!root.isConnected) return;
+    data = await api(path);
+  }
+  const top = scrollY;
+  disposeCharts();
+  root.replaceChildren();
+  await redraw();
+  scrollTo(0, top);
 }
 
 async function request(path, options = {}) {

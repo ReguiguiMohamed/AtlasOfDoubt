@@ -1,10 +1,12 @@
 import { t } from "../i18n.js";
-import { api, axis, chart, count, countryPicker, css, esc, html, index, km, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn } from "../lib.js";
+import { api, axis, chart, count, countryPicker, css, esc, html, index, km, kpi, pct, pctColumn, query, scoped, state, table, usd, usdColumn, whenFilled } from "../lib.js";
 
 export default async function country(root, [code], params) {
   if (!code) return list(root);
   const wanted = Number(params.get("year")) || undefined;
-  const data = await api(`/countries/${code}?${scoped({ year: wanted })}`);
+  const path = `/countries/${code}?${scoped({ year: wanted })}`;
+  const data = await api(path);
+  whenFilled(root, path, data, () => country(root, [code], params));
   const name = data.country.countryName;
   const reporter = esc(state.reporter.countryName);
   const recorded = data.years.filter((y) => y.valueUsd != null || y.exportsUsd != null);

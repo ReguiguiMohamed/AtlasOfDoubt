@@ -1,5 +1,5 @@
 import { t } from "../i18n.js";
-import { api, axis, centroid, chart, count, css, doubling, esc, geoColumns, gravity, html, index, km, kpi, loadWorld, pct, pctColumn, query, reach, scoped, shapeId, state, storeTag, table, tonsColumn, unavailable, usd, usdColumn, zoomable } from "../lib.js";
+import { api, axis, centroid, chart, count, css, doubling, esc, geoColumns, gravity, html, index, km, kpi, loadWorld, pct, pctColumn, query, reach, scoped, shapeId, state, storeTag, table, tonsColumn, unavailable, usd, usdColumn, whenFilled, zoomable } from "../lib.js";
 
 const CASE_STUDIES = [
   ["10", "Cereals (chapter 10)"],
@@ -321,7 +321,9 @@ function supplyMap(panel, recorded, current, located, code, own) {
 
 export default async function product(root, [code], params) {
   if (!code) return search(root, params.get("q") ?? "");
-  const data = await api(`/products/${code}/history?${scoped()}`);
+  const path = `/products/${code}/history?${scoped()}`;
+  const data = await api(path);
+  whenFilled(root, path, data, () => product(root, [code], params));
   const reporter = esc(state.reporter.countryName);
   const single = code.length === 6;
   const members = data.products.length;
