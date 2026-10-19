@@ -4,7 +4,9 @@
 
 AtlasOfDoubt shows, for any of 238 countries, how few suppliers sell it each product it imports, where its exports go and what a cut at one supplier would cost, from 13 years of CEPII BACI trade flows.
 
-![Japan's wheat imports in 2024: $1.7B from 16 suppliers, 39.1% from the USA, HHI 0.351, on a world map of supplier flows](docs/media/hero.webp)
+Live at [atlasofdoubt.francecentral.cloudapp.azure.com](https://atlasofdoubt.francecentral.cloudapp.azure.com), one Azure VM described in [`deploy/`](deploy/).
+
+[![Japan's wheat imports in 2024: $1.7B from 16 suppliers, 39.1% from the USA, HHI 0.351, on a world map of supplier flows](docs/media/hero.webp)](https://atlasofdoubt.francecentral.cloudapp.azure.com)
 
 Pick a country and every page reads its trade. Japan bought $1.7B of wheat in 2024 from 16 countries, but the top three sent 99.8% of it.
 
@@ -88,6 +90,7 @@ Timings ran on one Windows laptop on 18 October 2026, snapshot `BACI_HS12_V20260
 | [`tests/`](tests/) | what each test guarantees |
 | [`docs/`](docs/) | conception diagrams, data dictionary, storage research and case studies |
 | [`docker-compose.yml`](docker-compose.yml) | MongoDB 9.0 and the app, both pinned |
+| [`deploy/`](deploy/) | the public Azure server, Caddy for HTTPS and the data copy |
 
 ## Built with
 
