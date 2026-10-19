@@ -43,10 +43,20 @@ az network public-ip update -g atlas-rg -n atlasPublicIP --dns-name atlasofdoubt
 curl -fsSL https://get.docker.com | sudo sh
 ```
 
-The app's warm-up rebuilds the last visited countries at boot. Without swap that filled the 4 GB and froze the VM, SSH included, so it gets 4 GB of swap and the app container a 2.5 GB cap.
+The app's warm-up rebuilds the last visited countries at boot. Without swap that filled the 4 GB and froze the VM, SSH included. Now the VM has 4 GB of swap, and [`compose.yml`](compose.yml) caps each container's memory and the app's CPU.
 
 ```bash
 sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+Compose rotates container logs at 30 MB each. The journal stops at 200 MB, and a weekly job drops images and build cache unused for a week. Volumes and `data/` are never touched.
+
+```bash
+sudo sed -i 's/^#\?SystemMaxUse=.*/SystemMaxUse=200M/' /etc/systemd/journald.conf && sudo systemctl restart systemd-journald
+```
+
+```bash
+printf '#!/bin/sh\ndocker image prune -af --filter until=168h\ndocker builder prune -af --filter until=168h\n' | sudo tee /etc/cron.weekly/docker-prune && sudo chmod +x /etc/cron.weekly/docker-prune
 ```
 
 ```bash
