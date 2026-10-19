@@ -85,7 +85,7 @@ A new release takes the same one command with its own archive. `pytest -q` runs 
 
 | Check | Result |
 | --- | --- |
-| Tests | 96 passed locally against MongoDB 9.0, and 7 Node frontend tests |
+| Tests | 96 passed locally against MongoDB 9.0, and 8 Node frontend tests |
 | Tariffs, latest WITS schedules | 883,010 HS2012 rows from 170 schedules, covering 196 of BACI's countries |
 | Full release in the stores | 142,112,452 flows for 238 countries, 2012 to 2024: 1,049 MB of Parquet, 408 MB of MongoDB data with 96 MB of indexes, an 89 MB Ladybug graph of 4,555,246 edges, 11 MB of Milvus vectors |
 | First visit to a country, 18 October 2026 | 40 s for Fiji, 56 s for Brazil, 97 s for the USA, down from 70 s, 109 s and 166 s |

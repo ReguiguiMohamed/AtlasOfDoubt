@@ -92,6 +92,10 @@ visit.
 
 The header picks the reporting country, stored in `?reporter=` so a shared
 link opens on the same one. Without it the app asks for a country first.
+A snapshot's answers never change, so the browser keeps the last 40 in memory,
+and once a page shows it loads the imports, exports, sea routes and trade
+twins behind it. On Japan the next click on exports, routes or imports sent no
+request and drew in 0.6 to 0.9 s.
 
 | Route | View |
 | --- | --- |
@@ -134,7 +138,8 @@ reporter.
 MongoDB 9.0 service for them.
 
 `node --test tests/frontend.test.mjs` checks chart tooltip confinement, toolbar
-spacing, zoom axes, reset and narrow-screen label settings without MongoDB.
+spacing, zoom axes, reset, narrow-screen label settings and the browser cache of
+snapshot answers without MongoDB.
 
 | Guarantee | Tests |
 | --- | --- |
