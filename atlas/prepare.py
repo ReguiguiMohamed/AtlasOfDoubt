@@ -602,7 +602,7 @@ def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths
             con.execute("CREATE TABLE countries AS SELECT unnest(?::VARCHAR[]) AS code", [[r["country_code"] for r in country_rows]])
             con.execute("CREATE TABLE products AS SELECT unnest(?::VARCHAR[]) AS code", [list(products)])
 
-            errors, samples, files, world_totals, prody_2012 = Counter(), [], [], {}, {}
+            errors, samples, files, world_totals, prody_2012, traded = Counter(), [], [], {}, {}, set()
             for year in YEARS:
                 name = f"BACI_{classification}_Y{year}_V{release}.csv"
                 if name not in archive.namelist():
@@ -612,6 +612,7 @@ def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths
                 os.remove(csv_path)
                 write_year(con, out, year, record)
                 world_docs, country_docs, world_totals[str(year)] = summarize_year(con, snapshot_id, year, gdp, common, prody_2012)
+                traded.update(d["countryCode"] for d in country_docs)
                 if year == YEARS[-1]:
                     trade_graph = write_graph(
                         con, out, scratch, [int(r["country_code"]) for r in country_rows], year, world_totals[str(year)]
@@ -633,7 +634,8 @@ def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths
             )
             if pairs:
                 db.geo_pairs.insert_many(
-                    [{"snapshotId": snapshot_id, "countryCode": a, "partnerCode": b, **f} for (a, b), f in sorted(pairs.items())],
+                    [{"snapshotId": snapshot_id, "countryCode": a, "partnerCode": b, **f} for (a, b), f in sorted(pairs.items())
+                     if a in traded and b in traded],
                     ordered=False,
                 )
             for collection, make in ((db.tariffs, tariff_docs), (db.preferences, preference_docs)):
@@ -649,6 +651,8 @@ def prepare(path, db, gdp_path=None, geo_paths=None, tariff_paths=None, hs_paths
         raise
 
     iso2 = {r["country_code"]: r["country_iso2"] or None for r in country_rows}
+    # The dictionary keeps dissolved states like the USSR, which never trade in these years and would only clutter the picker.
+    country_rows = [r for r in country_rows if int(r["country_code"]) in traded]
     ready = {
         "status": "ready",
         "preparedAt": datetime.now(timezone.utc),

@@ -595,7 +595,7 @@ def test_a_market_charges_the_reporter_its_best_preference_and_a_customs_union_n
         encoding="utf-8",
     )
     partners.write_text("partner,name,group,members\nP01,Invented pact,1,156;4\n156,China,0,156\nQ02,Invented scheme,1,251;380;156\nC99,C99,1,\n", encoding="utf-8")
-    snapshot = prepare(make_archive(FLOWS), db, tariff_paths=(*fixture_tariffs(tmp_path), preferences, partners))
+    snapshot = prepare(make_archive({**FLOWS, 2024: ["2024,156,251,100119,1,1"]}), db, tariff_paths=(*fixture_tariffs(tmp_path), preferences, partners))
     assert snapshot["tariffs"]["unresolvedPartners"] == ["C99"]
     with TestClient(app) as client:
         china = client.get("/api/products/100119/tariffs", params={"snapshot": snapshot["_id"], "reporter": CHINA}).json()

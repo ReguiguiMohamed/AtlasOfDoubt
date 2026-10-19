@@ -145,19 +145,24 @@ def test_exports_carry_rca_unit_value_and_coverage(db, make_archive):
 def test_snapshot_records_provenance_counts_and_files(db, make_archive):
     snapshot = prepare(make_archive(FLOWS), db)
     assert len(snapshot["archive"]["sha256"]) == 64
-    assert snapshot["countries"][1] == {"countryCode": 156, "countryName": "China", "isoCode": "CHN", "iso2": "CH"}
+    assert snapshot["countries"][1] == {"countryCode": 380, "countryName": "Italy", "isoCode": "ITA", "iso2": "IT"}
     assert snapshot["counts"] == {
         "rows": 11,
         "flows": 7,
         "roundedValues": 0,
         "unreadableQuantities": 0,
         "dictionaryProducts": 4,
-        "countries": 6,
+        "countries": 4,
     }
     manifest = json.loads((DATA / snapshot["storage"]["path"] / "manifest.json").read_text())
     assert sum(f["rows"] for f in manifest if f["path"].startswith("flows/")) == 7
     assert snapshot["storage"]["files"] == len(manifest)
     assert not list(DATA.glob("*.partial"))
+
+
+def test_countries_that_never_trade_stay_out_of_the_snapshot(db, make_archive):
+    snapshot = prepare(make_archive(FLOWS), db)
+    assert [c["countryCode"] for c in snapshot["countries"]] == [251, 380, 788, 842]
 
 
 def test_graph_holds_the_last_year_once_per_exporter_importer_and_heading(db, make_archive):
@@ -256,15 +261,16 @@ def test_geography_maps_aliases_and_skips_pairs_inside_one_entity(tmp_path):
 
 
 def test_geography_changes_the_snapshot_id_and_is_stored_per_pair(db, make_archive, tmp_path):
-    without = prepare(make_archive(FLOWS), db)
-    snapshot = prepare(make_archive(FLOWS), db, geo_paths=fixture_geography(tmp_path))
+    flows = {**FLOWS, 2024: ["2024,4,251,100119,3,1"]}
+    without = prepare(make_archive(flows), db)
+    snapshot = prepare(make_archive(flows), db, geo_paths=fixture_geography(tmp_path))
     assert snapshot["_id"] != without["_id"]
     assert db.geo_pairs.count_documents({"snapshotId": without["_id"]}) == 0
     assert db.geo_pairs.count_documents({"snapshotId": snapshot["_id"]}) == 4
     pair = db.geo_pairs.find_one({"snapshotId": snapshot["_id"], "countryCode": 788, "partnerCode": 251}, {"_id": 0, "distanceKm": 1})
     assert pair == {"distanceKm": 1501}
     assert {c["isoCode"]: c.get("landlocked") for c in snapshot["countries"]} == {
-        "AFG": True, "CHN": None, "FRA": False, "ITA": False, "TUN": False, "USA": None,
+        "AFG": True, "FRA": False, "ITA": False, "TUN": False, "USA": None,
     }
     assert snapshot["geography"]["unmatched"] == [156, 842]
     assert snapshot["manifest"]["geodistSha256"] == [f["sha256"] for f in snapshot["geography"]["files"]]
