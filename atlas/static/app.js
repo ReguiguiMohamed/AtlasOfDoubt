@@ -1,5 +1,5 @@
 import { lang, switchLang, t } from "./i18n.js";
-import { api, countryPicker, disposeCharts, esc, html, snapshotDetail, state } from "./lib.js";
+import { api, countryPicker, disposeCharts, esc, html, preload, scoped, snapshotDetail, state } from "./lib.js";
 import overview from "./views/overview.js";
 import exports from "./views/exports.js";
 import country from "./views/country.js";
@@ -115,6 +115,11 @@ async function render() {
       .map((c) => `<option value="${c.countryCode}">${esc(c.countryName)}</option>`).join("")}`;
     chooseReporter(state.reporter?.countryCode ?? new URLSearchParams(location.search).get("reporter") ?? remembered("reporter"));
     await (state.reporter ? view(section, rest, new URLSearchParams(search)) : start(section));
+    // The same requests the main pages make when opened without a year, so their first click is already warm.
+    if (state.reporter) {
+      const twins = state.snapshot.twins ? ["imports", "exports"].map((flow) => `/twins?${scoped({ flow })}`) : [];
+      preload([`/overview?${scoped({ minValue: 1_000_000 })}`, `/exports?${scoped({ minValue: 1_000_000 })}`, `/routes?${scoped()}`, ...twins]);
+    }
   } catch (error) {
     section.innerHTML = `<p class="error">${esc(error.message)}</p>`;
   } finally {

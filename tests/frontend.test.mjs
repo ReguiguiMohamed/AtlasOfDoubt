@@ -26,7 +26,7 @@ globalThis.echarts = {
   }),
 };
 
-const { chart, disposeCharts, relativeRanks } = await import("../atlas/static/lib.js");
+const { api, chart, disposeCharts, preload, relativeRanks } = await import("../atlas/static/lib.js");
 const node = () => ({ append() {} });
 afterEach(disposeCharts);
 
@@ -109,4 +109,29 @@ test("close similarity scores span the palette while ties keep the same color", 
   assert.deepEqual(values, [0.700002, 0.7, 0.700001, 0.700001]);
   assert.deepEqual([...relativeRanks([0.7, 0.7])], [[0.7, 0.5]]);
   assert.equal(relativeRanks([]).size, 0);
+});
+
+test("snapshot answers are fetched once and each reader gets its own copy", async () => {
+  const asked = [];
+  globalThis.fetch = async (url, options) => {
+    asked.push(`${options.method ?? "GET"} ${url}`);
+    if (url.includes("broken")) return { ok: false, status: 503, statusText: "Busy", json: async () => ({}) };
+    return { ok: true, json: async () => ({ rows: [1, 2] }) };
+  };
+  await preload(["/exports?snapshot=s&reporter=1"]);
+  const first = await api("/exports?snapshot=s&reporter=1");
+  first.rows.push(3);
+  assert.deepEqual((await api("/exports?snapshot=s&reporter=1")).rows, [1, 2]);
+  await assert.rejects(api("/broken?snapshot=s"));
+  await assert.rejects(api("/broken?snapshot=s"));
+  await api("/reports?reporter=1");
+  await api("/reports?reporter=1");
+  await api("/scenarios/preview?snapshot=s", { method: "POST" });
+  await api("/scenarios/preview?snapshot=s", { method: "POST" });
+  assert.deepEqual(asked, [
+    "GET /api/exports?snapshot=s&reporter=1",
+    "GET /api/broken?snapshot=s", "GET /api/broken?snapshot=s",
+    "GET /api/reports?reporter=1", "GET /api/reports?reporter=1",
+    "POST /api/scenarios/preview?snapshot=s", "POST /api/scenarios/preview?snapshot=s",
+  ]);
 });

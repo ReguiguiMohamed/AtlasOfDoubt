@@ -17,7 +17,32 @@ function localize(value) {
   return value;
 }
 
-export async function api(path, options = {}) {
+// A snapshot's data never changes, so a page opened again, or one loaded ahead, answers from memory.
+const answers = new Map();
+const KEEP = 40;
+
+function answer(path) {
+  if (!answers.has(path)) {
+    const pending = request(path).catch((error) => {
+      if (answers.get(path) === pending) answers.delete(path);
+      throw error;
+    });
+    answers.set(path, pending);
+    if (answers.size > KEEP) answers.delete(answers.keys().next().value);
+  }
+  return answers.get(path);
+}
+
+// Views may change what they read, so each one gets its own copy.
+export const api = (path, options = {}) =>
+  options.method || !path.includes("snapshot=") ? request(path, options) : answer(path).then(structuredClone);
+
+// One at a time, so pages loaded ahead never crowd the one being read.
+export async function preload(paths) {
+  for (const path of paths) await answer(path).catch(() => {});
+}
+
+async function request(path, options = {}) {
   const response = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
