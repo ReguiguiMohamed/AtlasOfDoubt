@@ -2,21 +2,26 @@
 
 [![CI](https://github.com/ReguiguiMohamed/AtlasOfDoubt/actions/workflows/ci.yml/badge.svg)](https://github.com/ReguiguiMohamed/AtlasOfDoubt/actions/workflows/ci.yml)
 
-AtlasOfDoubt measures, for any country, how few suppliers sell it each product it imports, where its exports go and how a disruption at one supplier would hit it, from 13 years of CEPII BACI trade flows.
+AtlasOfDoubt shows, for any of 238 countries, how few suppliers sell it each product it imports, where its exports go and what a cut at one supplier would cost, from 13 years of CEPII BACI trade flows.
 
-![Product page for wheat, heading 1001, in 2024: imports, supplier count, top share, HHI and the world map of suppliers](docs/media/wheat.png)
+![Japan's wheat imports in 2024: $1.7B from 16 suppliers, 39.1% from the USA, HHI 0.351, on a world map of supplier flows](docs/media/hero.webp)
 
-Pick a country and every page reads its trade. Tunisia, the first country studied, imported $25.73B of goods in 2024. The 1,823 products worth at least $1M each made up $25.03B of it, and for 1,090 of them one supplier or a handful held most of the market, with a Herfindahl-Hirschman index (HHI) of 0.25 or more. Wheat is one: $653.7M from 17 countries, 45.4% of it from Russia and 79.0% from the top three.
+Pick a country and every page reads its trade. Japan bought $1.7B of wheat in 2024 from 16 countries, but the top three sent 99.8% of it.
 
-A concentrated supplier list is a choice when the world market is open and a constraint when it is not. AtlasOfDoubt sets the reporter's HHI for each product against the HHI of world exports of the same product, with the reporter itself left out of the world side. On the export side it shows destinations, product and destination concentration, revealed comparative advantage, unit values with quality flags and EXPY, the income level of the basket.
+A short supplier list is a choice when the world market is open and a constraint when few countries export at all. AtlasOfDoubt sets each product's supplier HHI against the HHI of world exports of the same product, with the reporter left out of the world side.
+
+## What it shows
+
+| | |
+| --- | --- |
+| ![Choice or structure quadrant for Japan](docs/media/quadrant.webp) | ![Trade twins of Japan on a world map](docs/media/twins.webp) |
+| **Choice or structure.** Supplier HHI against world exporter HHI, one bubble per product. [Imports](atlas/static/README.md#imports) | **Trade twins.** Countries whose import basket looks most like the reporter's, from Milvus vectors. [Twins](atlas/README.md#stores) |
+| ![Tariff wall for cars sold to Japan](docs/media/tariffs.webp) | ![Supplier network of wheat from the Ladybug graph](docs/media/network.webp) |
+| **Tariff wall.** The rate every market charges the reporter on one product, preferences included. [Product](atlas/static/README.md#product) | **Supplier network.** Who else buys from the same suppliers, from the Ladybug graph. [Product](atlas/static/README.md#product) |
+| ![Sea routes to Japan with the Strait of Malacca](docs/media/routes.webp) | ![Scenario cutting US wheat to Japan by half](docs/media/scenario.webp) |
+| **Sea routes.** Import value per modelled lane and chokepoint. [Routes](atlas/README.md#sea-routes) | **Scenario.** Cut a share of chosen suppliers and save the result as a report. [Scenario](atlas/static/README.md#scenario-and-reports) |
 
 ## How it works
-
-1. **Prepare.** `python -m atlas.prepare` checks the 13 yearly files of a BACI release in DuckDB, writes the valid flows once as Parquet partitioned by importer and year, and stores world totals, country-year summaries, RCA inputs and PRODY in MongoDB. An optional World Bank GDP file adds PRODY and EXPY, and the CEPII GeoDist files add the distance, a shared border and a common official language for each country pair. Each country's latest WITS/TRAINS MFN tariff schedule, mapped to HS2012, goes into MongoDB beside them, with the HS section, chapter and heading name of every product. The last year's flows also go into a Ladybug graph, one edge per exporter, importer and HS4 heading, and into Milvus Lite as one sparse vector per country and flow over its HS6 basket.
-2. **Snapshot.** The snapshot id hashes every input, so preparing the same files twice returns the same snapshot, and a new release, GDP, GeoDist or tariff file lands beside the old one without changing numbers a report already cites.
-3. **Materialize.** The first visit to a country builds its view from its own Parquet partition into MongoDB, as one generation that becomes readable only when complete. Its first and last years come first, so the imports page opens before the other 11 years fill in behind it. The least recently used countries are evicted past a 1 GB budget and rebuilt with the same figures. A restart rebuilds the 3 countries visited last.
-4. **Measure.** One module, `atlas/metrics.py`, computes totals, shares, HHI, RCA, PRODY, EXPY and the scenario. Preparation, the API and saved reports all call it.
-5. **Explore and stress test.** The web app shows imports, exports, products, partner countries, the tariff each market charges the chosen country on a product, preferences included, the supplier network of a heading, each country's trade twins and modelled sea routes to the chosen country. A scenario cuts a share r of what chosen suppliers send, `affected = r × Σ supplier value`, and saves the result as an immutable report.
 
 ```mermaid
 flowchart LR
@@ -35,15 +40,19 @@ flowchart LR
     API --> Reports[(Reports<br>immutable)]
 ```
 
-## Run it
+1. **Prepare.** DuckDB checks the 13 yearly files and writes them once as Parquet by importer and year.
+2. **Snapshot.** The id hashes every input, so a new release lands beside the old one.
+3. **Materialize.** A country's first visit builds its view into MongoDB, first and last years first.
+4. **Measure.** One module, [`metrics.py`](atlas/metrics.py), does every sum, share and HHI.
+5. **Explore.** The web app reads the views, the graph, the twins and the tariffs.
 
-Both paths need the BACI archive in `data/raw/`. Prepare fetches the World Bank GDP file, the two CEPII GeoDist files and the two HS name files on its first run and keeps them in `data/snapshots/`:
+Each step is detailed in [`atlas/`](atlas/README.md).
+
+## Run it
 
 ```bash
 curl -L --create-dirs -o data/raw/BACI_HS12_V202601.zip https://www.cepii.fr/DATA_DOWNLOAD/baci/data/BACI_HS12_V202601.zip
 ```
-
-**With Docker**, nothing else to install:
 
 ```bash
 docker compose up --build -d
@@ -53,57 +62,31 @@ docker compose up --build -d
 docker compose run --rm app python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
 ```
 
-Then open http://localhost:8000. The Parquet files stay in `data/snapshots/` and the rest in the `mongo` volume.
-
-**Without Docker**, with Python 3.12 and MongoDB on port 27017:
-
-```bash
-pip install -e ".[dev]"
-```
-
-Tariffs are optional. These two fetch the WITS schedule list, the latest schedule of every BACI country and the preferential rates of each partner it lists, about 1,500 files, into `data/snapshots/`, and prepare picks them up:
-
-```bash
-python -m atlas.coverage data/raw/BACI_HS12_V202601.zip
-```
-
-```bash
-python -m atlas.tariffs
-```
-
-```bash
-python -m atlas.prepare data/raw/BACI_HS12_V202601.zip
-```
-
-```bash
-uvicorn atlas.api:app
-```
-
-A new release takes the same one command with its own archive. `pytest -q` runs the tests against the same local MongoDB in a database of its own, `atlas_test`.
+Then open http://localhost:8000. Running without Docker and adding tariffs are in [`atlas/`](atlas/README.md#run-without-docker).
 
 ## Results
 
 | Check | Result |
 | --- | --- |
-| Tests | 96 passed locally against MongoDB 9.0, and 8 Node frontend tests |
-| Tariffs, latest WITS schedules | 883,010 HS2012 rows from 170 schedules, covering 196 of BACI's countries |
-| Full release in the stores | 142,112,452 flows for 238 countries, 2012 to 2024: 1,049 MB of Parquet, 408 MB of MongoDB data with 96 MB of indexes, an 89 MB Ladybug graph of 4,555,246 edges, 11 MB of Milvus vectors |
-| First visit to a country, 18 October 2026 | 40 s for Fiji, 56 s for Brazil, 97 s for the USA, down from 70 s, 109 s and 166 s |
-| Imports page on a first visit, then every year | Japan 11 s then 44 s more, Germany 36 s then 68 s more |
-| Warm requests, median and 95th percentile | product history 40/152 ms, tariffs 45/57 ms, Milvus twins 256/341 ms, overview 413/790 ms, exports 796/917 ms, Ladybug network 1.1/1.2 s, country profile 1.0/2.2 s, routes 1.4/3.1 s |
-| Tunisia, 2024, products over $1M | 1,823, of which 1,090 with HHI at or above 0.25 |
-| Tunisia, concentrated by choice, 2024 | 877 products, $12.42B of $25.03B |
-| Tunisia, wheat 1001, 2024 | $653.7M, 17 suppliers, Russia 45.4%, top 3 79.0%, HHI 0.283 |
+| Tests | 96 pytest tests against MongoDB 9.0 and 8 Node tests, see [`tests/`](tests/) |
+| Full release | 142,112,452 flows, 238 countries, 2012 to 2024 |
+| Stores | 1,049 MB Parquet, 408 MB MongoDB data with 96 MB of indexes, 89 MB Ladybug graph of 4,555,246 edges, 11 MB Milvus vectors |
+| Tariffs | 883,010 HS2012 rows from 170 WITS schedules, covering 196 countries |
+| First visit, every year | Fiji 40 s, Brazil 56 s, USA 97 s |
+| First visit, imports page | Japan 11 s, Germany 36 s |
+| Warm request, median | product history 40 ms, tariffs 45 ms, twins 256 ms, overview 413 ms, exports 796 ms, network 1.1 s, routes 1.4 s |
+| Japan, wheat 1001, 2024 | $1.7B, 16 suppliers, USA 39.1%, top 3 99.8%, HHI 0.351 |
 
-Timings ran on one Windows laptop against snapshot `BACI_HS12_V202601@537b2fe453e3`, 5 warm gzip requests per endpoint for each of the USA, Brazil, Kenya and Fiji. First visits gained most from packing Decimal128 values with integer arithmetic, since pymongo converts each of a country's 2.6 million decimals bit by bit in Python. The exports page used to send each product with its own destinations, 3.0 MB gzipped in 7.5 s for the USA. It now sends the products without them, 0.6 MB in 0.9 s, and the product page reads one product's destinations when it is opened. Routes and the country profile now make up the slow tail. The Tunisia figures come from the earlier Tunisia-only import, measured on the same release with the same `metrics.py`. Storage and build-time estimates for every country are in [architecture-research.md](docs/architecture-research.md).
+Timings ran on one Windows laptop on 18 October 2026, snapshot `BACI_HS12_V202601@537b2fe453e3`, 5 warm gzip requests per endpoint for the USA, Brazil, Kenya and Fiji. Storage estimates are in [architecture-research.md](docs/architecture-research.md).
 
 ## Repository
 
 | Path | Contents |
 | --- | --- |
-| [`atlas/`](atlas/) | preparation, country views, metrics, API and the web app, with what each test guarantees |
-| [`tests/`](tests/) | unit, preparation and API tests against a real MongoDB |
-| [`docs/`](docs/) | conception diagrams, data dictionary, storage research and three case studies |
+| [`atlas/`](atlas/) | preparation, stores, country views, metrics and the API |
+| [`atlas/static/`](atlas/static/) | the web app, page by page |
+| [`tests/`](tests/) | what each test guarantees |
+| [`docs/`](docs/) | conception diagrams, data dictionary, storage research and case studies |
 | [`docker-compose.yml`](docker-compose.yml) | MongoDB 9.0 and the app, both pinned |
 
 ## Built with
@@ -112,7 +95,15 @@ Python 3.12, FastAPI 0.143.3, PyMongo 4.19.0, DuckDB 1.5.6, MongoDB 9.0, Ladybug
 
 ## Data
 
-[CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), HS 2012 nomenclature, release V202601, under the Etalab Open License 2.0. GDP per capita, PPP, constant 2021 dollars, from the [World Bank WDI](https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD) under CC BY 4.0. Distances, borders, languages and landlocked status from [CEPII GeoDist](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=6) under the Etalab Open License 2.0, with the distance taken between the most populated cities (Mayer and Zignago, 2011). Import tariffs from UNCTAD TRAINS, retrieved through the World Bank's [WITS](https://wits.worldbank.org), under the WITS/TRAINS licence in the World Bank data catalogue. TRAINS data are provided as is, and the user assumes all risk in their use. HS section, chapter and heading names, in English only, from the [DataHub harmonized-system](https://github.com/datasets/harmonized-system) dataset under the ODC Public Domain Dedication and License 1.0. The archive, the tariff files and the prepared files stay out of git and out of the image.
+| Source | Used for | Licence |
+| --- | --- | --- |
+| [CEPII BACI](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37) HS12 V202601 | trade flows | Etalab Open License 2.0 |
+| [World Bank WDI](https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD) | GDP per capita, PPP, constant 2021 dollars | CC BY 4.0 |
+| [CEPII GeoDist](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=6) | distance between the most populated cities, borders, languages (Mayer and Zignago, 2011) | Etalab Open License 2.0 |
+| UNCTAD TRAINS through [WITS](https://wits.worldbank.org) | MFN and preferential tariffs, provided as is, the user assumes all risk | WITS/TRAINS licence |
+| [DataHub harmonized-system](https://github.com/datasets/harmonized-system) | HS section, chapter and heading names, English only | ODC PDDL 1.0 |
+
+The archive, the tariff files and the prepared files stay out of git and out of the image.
 
 ## License
 
