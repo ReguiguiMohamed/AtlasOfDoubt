@@ -13,6 +13,7 @@ import io
 import os
 import re
 import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -52,6 +53,7 @@ def warm(db):
 @asynccontextmanager
 async def lifespan(app):
     client, app.state.db = connect()
+    app.state.saves = {}
     # A fill cut short by the last stop is taken over by its next reader instead of waiting out its lease.
     app.state.db.materializations.update_many({"years": {"$exists": True}}, {"$set": {"leaseUntil": datetime(1970, 1, 1, tzinfo=timezone.utc)}})
     # Tests prepare and delete snapshots under the warm thread's feet, so they turn it off.
@@ -648,7 +650,7 @@ class ScenarioSpec(BaseModel):
     year: int
     mode: Literal["product", "country"]
     productCode: str | None = Field(None, pattern=CODE_PATTERN)
-    suppliers: list[int] = Field(min_length=1)
+    suppliers: list[int] = Field(min_length=1, max_length=300)
     reduction: Decimal = Field(ge=0, le=1)
 
 
@@ -712,8 +714,22 @@ def preview(db: Db, spec: ScenarioSpec):
     return {"spec": spec.model_dump(), "calculationVersion": metrics.CALCULATION_VERSION, "result": result}
 
 
+# Reports are open writes on a public server, so each client saves at most this many an hour.
+REPORTS_PER_HOUR = 20
+
+
+# ponytail: one process keeps the counts in memory, move them to MongoDB when uvicorn runs several workers.
+def throttle(saves, client):
+    now = time.monotonic()
+    recent = [t for t in saves.get(client, ()) if now - t < 3600]
+    if len(recent) >= REPORTS_PER_HOUR:
+        raise HTTPException(429, f"at most {REPORTS_PER_HOUR} reports an hour")
+    saves[client] = recent + [now]
+
+
 @app.post("/api/reports", status_code=201)
-def create_report(db: Db, request: ReportRequest):
+def create_report(db: Db, request: ReportRequest, http: Request):
+    throttle(http.app.state.saves, http.client.host if http.client else "")
     snapshot, reporter, generation = scope(db, request.snapshot, request.reporter, [request.year])
     result = run_scenario(db, snapshot, generation, request)
     report = {

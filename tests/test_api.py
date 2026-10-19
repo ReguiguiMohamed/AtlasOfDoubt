@@ -183,6 +183,15 @@ def test_report_csv_exports_the_result_table(api):
     assert len(lines) == 4
 
 
+def test_a_client_saves_a_limited_number_of_reports_an_hour(api, monkeypatch):
+    from atlas import api as server
+    monkeypatch.setattr(server, "REPORTS_PER_HOUR", 2)
+    body = {"snapshot": api.snapshot, "reporter": TUNISIA, "year": 2012, "mode": "product", "productCode": "010121",
+            "suppliers": [251], "reduction": 0.5, "title": "France halves"}
+    assert [api.post("/api/reports", json=body).status_code for _ in range(3)] == [201, 201, 429]
+    assert len(api.get("/api/reports").json()) == 2
+
+
 def test_unknown_report_is_not_found(api):
     assert api.get("/api/reports/not-an-id").status_code == 404
     assert api.get("/api/reports/0123456789abcdef01234567").status_code == 404
