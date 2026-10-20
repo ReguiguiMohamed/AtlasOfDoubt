@@ -233,8 +233,13 @@ export default async function seaRoutes(root, _, params) {
     const preview = await api("/scenarios/preview", {
       method: "POST",
       body: JSON.stringify({ snapshot: state.snapshot._id, reporter: state.reporter.countryCode, year: data.year, regions: item.routes ?? [item.id], reduction: "1" }),
-    });
+    }).catch((error) => error);
     if (ticket !== asked || !detail.isConnected) return;
+    if (preview instanceof Error) {
+      touched.textContent = t("n/a");
+      touched.insertAdjacentHTML("afterend", `<span class="note">${esc(preview.message)}</span>`);
+      return;
+    }
     const products = preview.result.products.filter((p) => p.productCode.startsWith(code));
     touched.textContent = count(products.length);
     exposed.setData(products);

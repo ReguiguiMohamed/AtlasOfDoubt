@@ -26,7 +26,7 @@ globalThis.echarts = {
   }),
 };
 
-const { api, chart, disposeCharts, preload, relativeRanks } = await import("../atlas/static/lib.js");
+const { api, chart, disposeCharts, preload, relativeRanks, sampleFile } = await import("../atlas/static/lib.js");
 const { cut } = await import("../atlas/static/map.js");
 const node = () => ({ append() {} });
 afterEach(disposeCharts);
@@ -144,4 +144,11 @@ test("cut splits a lane only where it crosses the map's edge", () => {
   for (const piece of cut(pacific, 0)) for (const [x] of piece) assert.ok(Math.abs(x) <= 180);
   // A point a hair past the edge once set the step count to Infinity.
   assert.equal(cut([[179.95000000000005, -60], [179.95000000000005, 60]], 0).length, 1);
+});
+
+test("sampleFile names a GET answer the way deploy/pages.py saves it", () => {
+  assert.equal(sampleFile("/snapshots", 2024), "api/snapshots.json");
+  assert.equal(sampleFile("/countries/842?snapshot=S%401&reporter=392&year=2024", 2024), "api/countries/842/reporter=392&snapshot=S@1.json");
+  assert.equal(sampleFile("/movers?to=2024&from=2012&reporter=392", 2024), "api/movers/from=2012&reporter=392&to=2024.json");
+  assert.equal(sampleFile("/overview?year=2023&reporter=392", 2024), "api/overview/reporter=392&year=2023.json");
 });

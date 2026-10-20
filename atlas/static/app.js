@@ -50,9 +50,12 @@ function remember(key, value) {
   } catch {}
 }
 
+// The GitHub Pages sample names the few countries it was saved for, and only those can be picked.
+const reporters = () => state.detail.countries.filter((c) => !state.detail.reporters || state.detail.reporters.includes(c.countryCode));
+
 // The reporter sits in the query string beside the language, so a shared link opens on the same country.
 function chooseReporter(code) {
-  state.reporter = state.detail.countries.find((c) => String(c.countryCode) === String(code)) ?? null;
+  state.reporter = reporters().find((c) => String(c.countryCode) === String(code)) ?? null;
   reporterPicker.value = state.reporter?.countryCode ?? "";
   if (!state.reporter) return;
   remember("reporter", code);
@@ -68,7 +71,7 @@ function start(section) {
       <p class="lede">${t("Every page reads the trade of one country: who supplies its imports, where its exports go, and which sea routes carry them. Pick the country to start, and change it at any time from the header.")}</p>
     </div>
     <div class="panel"><div id="countries"></div></div>`));
-  countryPicker(section.querySelector("#countries"), state.detail.countries, (c) => {
+  countryPicker(section.querySelector("#countries"), reporters(), (c) => {
     chooseReporter(c.countryCode);
     render();
   });
@@ -110,7 +113,7 @@ async function render() {
   }, 1000);
   try {
     await snapshotDetail();
-    reporterPicker.innerHTML = `<option value="">${t("Choose")}</option>${[...state.detail.countries]
+    reporterPicker.innerHTML = `<option value="">${t("Choose")}</option>${reporters()
       .sort((a, b) => a.countryName.localeCompare(b.countryName, lang))
       .map((c) => `<option value="${c.countryCode}">${esc(c.countryName)}</option>`).join("")}`;
     chooseReporter(state.reporter?.countryCode ?? new URLSearchParams(location.search).get("reporter") ?? remembered("reporter"));

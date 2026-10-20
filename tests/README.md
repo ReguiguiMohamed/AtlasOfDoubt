@@ -1,12 +1,12 @@
 # tests
 
-`pytest -q` runs 96 tests against MongoDB on port 27017, in a database of its own, `atlas_test`, dropped before each test. CI starts a MongoDB 9.0 service for them.
+`pytest -q` runs 116 tests against MongoDB on port 27017, in a database of its own, `atlas_test`, dropped before each test. CI starts a MongoDB 9.0 service for them.
 
 ```bash
 pytest -q
 ```
 
-`node --test` runs 8 frontend tests without MongoDB: tooltip confinement, toolbar spacing, zoom axes, reset, narrow-screen labels and the browser cache.
+`node --test` runs 10 frontend tests without MongoDB: tooltip confinement, toolbar spacing, zoom axes, reset, narrow-screen labels, the browser cache and the file names of the GitHub Pages sample.
 
 ```bash
 node --test tests/frontend.test.mjs
@@ -20,7 +20,8 @@ node --test tests/frontend.test.mjs
 | [`test_coverage.py`](test_coverage.py) | WITS and GeoDist codes to BACI countries |
 | [`test_db.py`](test_db.py) | the Decimal128 codec |
 | [`test_api.py`](test_api.py) | endpoints, country views, scenarios, reports, twins, routes |
-| [`frontend.test.mjs`](frontend.test.mjs) | chart settings and the browser cache |
+| [`test_pages.py`](test_pages.py) | the file names of the GitHub Pages sample |
+| [`frontend.test.mjs`](frontend.test.mjs) | chart settings, the browser cache and the sample's file names |
 
 ## Guarantees
 
