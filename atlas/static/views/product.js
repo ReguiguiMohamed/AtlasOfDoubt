@@ -191,13 +191,10 @@ function supplyMap(panel, recorded, current, located, code, own) {
       series: [
         {
           type: "map",
-          data: [
-            ...rows.map((s) => ({
-              name: shapeId(s.countryCode), value: s.share, supplier: s,
-              itemStyle: own.charged[s.countryCode] ? { borderColor: css("--accent"), borderWidth: 1.4, borderType: "dashed" } : undefined,
-            })),
-            { name: shapeId(reporter.countryCode), itemStyle: { areaColor: css("--warn") }, home: true },
-          ],
+          data: rows.map((s) => ({
+            name: shapeId(s.countryCode), value: s.share, supplier: s,
+            itemStyle: own.charged[s.countryCode] ? { borderColor: css("--accent"), borderWidth: 1.4, borderType: "dashed" } : undefined,
+          })),
         },
         {
           type: "lines",
@@ -216,8 +213,10 @@ function supplyMap(panel, recorded, current, located, code, own) {
     `<i>${t("Click for what it sells here")}</i>`,
   ].filter(Boolean).join("<br>");
   const instance = worldMap(panel.querySelector("#map"), {
-    tooltip: { formatter: (p) => (p.data?.supplier ? tip(p.data.supplier) : p.data?.home ? `<b>${esc(reporter.countryName)}</b>` : "") },
+    tooltip: { formatter: (p) => (p.data?.supplier ? tip(p.data.supplier) : p.name === shapeId(reporter.countryCode) ? `<b>${esc(reporter.countryName)}</b>` : "") },
     visualMap: { min: 0, max: top, text: [pct(top, 0), pct(0, 0)], inRange: { color: [css("--supply-soft"), css("--supply")] } },
+    // The visualMap clears the color of any data item without a value, so home is painted as a region.
+    geo: { regions: [{ name: shapeId(reporter.countryCode), itemStyle: { areaColor: css("--warn") } }] },
     series: [
       { type: "map" },
       { type: "lines", coordinateSystem: "geo", polyline: true, effect: { show: true, period: 5, symbol: "arrow", symbolSize: 5, color: css("--warn") }, lineStyle: { color: css("--supply"), opacity: 0.5 } },

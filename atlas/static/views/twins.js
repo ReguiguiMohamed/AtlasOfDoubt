@@ -31,15 +31,13 @@ export default async function twins(root, flow) {
 
   loadWorld()
     .then(() => panel.isConnected && worldMap(panel.querySelector(`#twins-map-${flow}`), {
-      tooltip: { formatter: (p) => (p.data?.twin ? tip(p.data.twin) : p.data?.name === shapeId(data.reporter) ? `<b>${reporter}</b>` : "") },
+      tooltip: { formatter: (p) => (p.data?.twin ? tip(p.data.twin) : p.name === shapeId(data.reporter) ? `<b>${reporter}</b>` : "") },
       visualMap: { min: 0, max: 1, text: [t("More similar"), t("Less similar")], inRange: { color: ["#eaf2f7", "#7bb5b4", css("--accent")] } },
-      geo: { emphasis: { label: { show: false }, itemStyle: { areaColor: css("--sold") } } },
+      // The visualMap clears the color of any data item without a value, so the reporter is painted as a region.
+      geo: { emphasis: { label: { show: false }, itemStyle: { areaColor: css("--sold") } }, regions: [{ name: shapeId(data.reporter), itemStyle: { areaColor: css("--warn") } }] },
       series: [{
         type: "map",
-        data: [
-          ...data.similar.map((s) => ({ name: shapeId(s.countryCode), value: ranks.get(s.similarity), twin: data.closest.find((c) => c.countryCode === s.countryCode) ?? s })),
-          { name: shapeId(data.reporter), itemStyle: { areaColor: css("--warn") }, twin: null },
-        ],
+        data: data.similar.map((s) => ({ name: shapeId(s.countryCode), value: ranks.get(s.similarity), twin: data.closest.find((c) => c.countryCode === s.countryCode) ?? s })),
       }],
     }).on("click", (p) => p.data?.twin && (location.hash = `#/country/${p.data.twin.countryCode}`)))
     .catch(() => panel.querySelector(`#twins-map-${flow}`).remove());
