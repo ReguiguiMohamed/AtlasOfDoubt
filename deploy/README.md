@@ -94,3 +94,13 @@ The app creates its indexes on the next start.
 ```bash
 sudo docker compose -f docker-compose.yml -f deploy/compose.yml restart app
 ```
+
+## Static sample
+
+[reguiguimohamed.github.io/AtlasOfDoubt](https://reguiguimohamed.github.io/AtlasOfDoubt/) needs no server. [`pages.py`](pages.py) saves the GET answers of eight countries, the latest year, their top imports and the product page's case studies to `deploy/sample/api`, and on `github.io` the app reads those files in place of `/api`. Scenarios, reports and anything outside the sample show a note instead.
+
+The answers are committed, since GitHub Actions has neither the 1 GB snapshot nor its MongoDB documents. A push to `main` that changes `atlas/static` or `deploy/sample` runs [`pages.yml`](../.github/workflows/pages.yml), which publishes both. To regenerate the sample, run MongoDB and the app locally, then:
+
+```bash
+python -m deploy.pages
+```
