@@ -65,8 +65,26 @@ export async function whenFilled(root, path, data, redraw) {
   scrollTo(0, top);
 }
 
+// The GitHub Pages sample has no server. Its GET answers are files saved by deploy/pages.py, named as in filename() there.
+const SAMPLE = location.hostname.endsWith("github.io");
+
+export function sampleFile(path, latest) {
+  const [base, search = ""] = path.split("?");
+  const params = [...new URLSearchParams(search)]
+    .filter(([k, v]) => !(k === "year" && v === String(latest)))
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
+  return `api${base}${params && `/${params}`}.json`;
+}
+
 async function request(path, options = {}) {
-  const response = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
+  const response = SAMPLE
+    ? !options.method && (await fetch(sampleFile(path, state.snapshot?.years.at(-1))))
+    : await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
+  if (SAMPLE && !response.ok) {
+    throw new Error(t("This free sample covers a few countries and their main products in the latest year. Scenarios, saved reports and everything else run in the full app, started on demand."));
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const detail = typeof body.detail === "string" ? body.detail : body.detail?.[0]?.msg;

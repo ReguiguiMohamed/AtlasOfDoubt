@@ -70,7 +70,7 @@ Then open http://localhost:8000. Running without Docker and adding tariffs are i
 
 | Check | Result |
 | --- | --- |
-| Tests | 96 pytest tests against MongoDB 9.0 and 8 Node tests, see [`tests/`](tests/) |
+| Tests | 116 pytest tests against MongoDB 9.0 and 10 Node tests, see [`tests/`](tests/) |
 | Full release | 142,112,452 flows, 238 countries, 2012 to 2024 |
 | Stores | 1,049 MB Parquet, 408 MB MongoDB data with 96 MB of indexes, 89 MB Ladybug graph of 4,555,246 edges, 11 MB Milvus vectors |
 | Tariffs | 883,010 HS2012 rows from 170 WITS schedules, covering 196 countries |

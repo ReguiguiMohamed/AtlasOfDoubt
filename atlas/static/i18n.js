@@ -209,6 +209,8 @@ const FR = {
   "Exports": "Exportations",
   "Choose": "Choisir",
   "Choose a country": "Choisissez un pays",
+  "This free sample covers a few countries and their main products in the latest year. Scenarios, saved reports and everything else run in the full app, started on demand.":
+    "Cet échantillon gratuit couvre quelques pays et leurs principaux produits pour la dernière année. Les scénarios, les rapports enregistrés et tout le reste tournent dans l'application complète, lancée à la demande.",
   "Every page reads the trade of one country: who supplies its imports, where its exports go, and which sea routes carry them. Pick the country to start, and change it at any time from the header.": "Chaque page lit le commerce d'un pays : qui fournit ses importations, où vont ses exportations et quelles routes maritimes les portent. Choisissez le pays pour commencer, et changez-le à tout moment depuis l'en-tête.",
   "Prepare a BACI release first:": "Préparez d'abord une version de BACI :",
   "Imports of {reporter} by supplier concentration, {year}": "{reporter} : importations selon la concentration des fournisseurs, {year}",
