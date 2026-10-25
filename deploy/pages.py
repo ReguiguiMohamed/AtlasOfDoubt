@@ -17,8 +17,8 @@ from urllib.request import urlopen
 API = "http://localhost:8000/api"
 OUT = Path("deploy/sample")
 SNAPSHOT = "BACI_HS12_V202601@537b2fe453e3"
-# Japan, Germany, Brazil, Mexico, Nigeria, Ethiopia, India and Australia: every inhabited continent, low to high income.
-REPORTERS = [392, 276, 76, 484, 566, 231, 699, 36]
+# Japan, Germany, Brazil, Mexico, Nigeria, Ethiopia, India, Australia and Tunisia: every inhabited continent, low to high income.
+REPORTERS = [392, 276, 76, 484, 566, 231, 699, 36, 788]
 # The case studies the product page links to, wheat among them.
 CASE_STUDIES = ["10", "1001", "31", "85"]
 PRODUCTS = 6
