@@ -664,6 +664,68 @@ def exports(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | Non
     }
 
 
+@app.get("/api/balance")
+def trade_balance(db: Db, snapshot_id: SnapshotId, reporter: Reporter, year: int | None = None):
+    """The reporter's exports against its imports: a yearly trend, each partner and each HS section.
+
+    Every exporter's sale to the reporter is the reporter's import from it, so one pass over the
+    yearly totals gives both sides of each partner.
+    """
+    snapshot, home, generation = scope(db, snapshot_id, reporter, [year])
+    year = checked_year(snapshot, year)
+    names = names_of(snapshot)
+    ZERO = metrics.ZERO
+    own = {y["year"]: y for y in db.country_years.find({"snapshotId": snapshot_id, "countryCode": reporter}, {"_id": 0})}
+    trend = [
+        {"year": y, **metrics.balance(own[y]["exportsUsd"], own[y]["importsUsd"])} if y in own else {"year": y, "exportsUsd": None}
+        for y in snapshot["years"]
+    ]
+    chosen = own.get(year, {"exportsUsd": ZERO, "importsUsd": ZERO, "destinations": []})
+    sold = {d["countryCode"]: d["valueUsd"] for d in chosen["destinations"]}
+    bought = db.country_years.aggregate([
+        {"$match": {"snapshotId": snapshot_id, "year": year, "countryCode": {"$ne": reporter}}},
+        {"$project": {"countryCode": 1, "importsUsd": 1,
+                      "sale": {"$first": {"$filter": {"input": "$destinations", "cond": {"$eq": ["$$this.countryCode", reporter]}}}}}},
+        {"$project": {"_id": 0, "countryCode": 1, "importsUsd": 1, "valueUsd": "$sale.valueUsd"}},
+    ])
+    world = snapshot["worldTotals"][str(year)]
+    partners = []
+    for r in bought:
+        code, x, m = r["countryCode"], sold.get(r["countryCode"], ZERO), r.get("valueUsd", ZERO)
+        if x or m:
+            partners.append({
+                **{k: names[code][k] for k in ("countryCode", "countryName", "isoCode")}, **metrics.balance(x, m),
+                "intensity": metrics.rca(x, chosen["exportsUsd"], r["importsUsd"], world),
+            })
+    partners.sort(key=lambda p: p["exportsUsd"] + p["importsUsd"], reverse=True)
+
+    products = {p["productCode"]: p for p in db.products.find({"snapshotId": snapshot_id}, {"_id": 0, "snapshotId": 0})}
+    pairs = {}
+    for r in db.country_product_years.find(
+        {"generationId": generation, "year": year}, {"productCode": 1, "exports.totalUsd": 1, "imports.metrics.totalUsd": 1}
+    ):
+        p = products[r["productCode"]]
+        # Chapter 99 has no section, so its chapter stands in for one.
+        key = (p.get("section") or p["chapter"], p.get("sectionName") or p.get("chapterName"))
+        pairs.setdefault(key, []).append((
+            r["exports"]["totalUsd"] if "exports" in r else ZERO,
+            r["imports"]["metrics"]["totalUsd"] if "imports" in r else ZERO,
+        ))
+    summed = {k: (sum((x for x, _ in v), ZERO), sum((m for _, m in v), ZERO)) for k, v in pairs.items()}
+    lafay = metrics.lafay(summed)
+    sections = sorted(
+        ({"code": c, "name": n, **metrics.balance(*summed[(c, n)]), "grubelLloyd": metrics.grubel_lloyd(pairs[(c, n)]),
+          "lafay": lafay[(c, n)]} for c, n in pairs),
+        key=lambda s: s["lafay"] or ZERO, reverse=True,
+    )
+    return {
+        "snapshot": snapshot_id, "reporter": home, "year": year,
+        "overall": {**metrics.balance(chosen["exportsUsd"], chosen["importsUsd"]),
+                    "grubelLloyd": metrics.grubel_lloyd(p for v in pairs.values() for p in v)},
+        "years": trend, "partners": partners, "sections": sections,
+    }
+
+
 LIMITATIONS = [
     "Values are nominal current US dollars as published in BACI, with no inflation adjustment.",
     "The value at risk is historical import value exposed under this scenario. It is not a forecast of losses.",

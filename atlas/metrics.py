@@ -132,6 +132,44 @@ def rca(x_ck, x_c, x_k, x):
     return (x_ck / x_c) / (x_k / x)
 
 
+def balance(exports, imports):
+    """Trade balance, normalised balance (-1 to 1) and coverage ratio of one export and import pair."""
+    trade = exports + imports
+    return {
+        "exportsUsd": exports,
+        "importsUsd": imports,
+        "balanceUsd": exports - imports,
+        "normalized": (exports - imports) / trade if trade else None,
+        "coverage": exports / imports if imports else None,
+    }
+
+
+def grubel_lloyd(pairs):
+    """Aggregate Grubel-Lloyd intra-industry trade over (exports, imports) pairs, 0 to 1.
+
+    Summing numerators and denominators weights each product by its trade,
+    where a plain mean would let a tiny product count like a large one.
+    """
+    pairs = list(pairs)
+    trade = sum((x + m for x, m in pairs), ZERO)
+    return 1 - sum((abs(x - m) for x, m in pairs), ZERO) / trade if trade else None
+
+
+def lafay(groups):
+    """Lafay index of each group, {key: (exports, imports)} to {key: index}.
+
+    A group scores its own balance minus the share of the overall balance its
+    trade would carry, in percent of total trade, so the indices add to zero.
+    """
+    exports = sum((x for x, _ in groups.values()), ZERO)
+    imports = sum((m for _, m in groups.values()), ZERO)
+    trade = exports + imports
+    if not trade:
+        return {k: None for k in groups}
+    overall = (exports - imports) / trade
+    return {k: 100 * ((x - m) - overall * (x + m)) / trade for k, (x, m) in groups.items()}
+
+
 def unit_value(value, tonnes):
     """USD per tonne over the flows that report a quantity."""
     return value / tonnes if tonnes else None
