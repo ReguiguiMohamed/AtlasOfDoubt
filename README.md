@@ -5,7 +5,7 @@
 AtlasOfDoubt shows, for any of 238 countries, how few suppliers sell it each product it imports, where its exports go and what a cut at one supplier would cost, from 13 years of CEPII BACI trade flows.
 
 Live at [atlasofdoubt.francecentral.cloudapp.azure.com](https://atlasofdoubt.francecentral.cloudapp.azure.com), one Azure VM described in [`deploy/`](deploy/).
-A static sample of eight countries in 2024 stays online at [reguiguimohamed.github.io/AtlasOfDoubt](https://reguiguimohamed.github.io/AtlasOfDoubt/).
+A static sample of nine countries in 2024 stays online at [reguiguimohamed.github.io/AtlasOfDoubt](https://reguiguimohamed.github.io/AtlasOfDoubt/).
 
 [![Japan's wheat imports in 2024: $1.7B from 16 suppliers, 39.1% from the USA, HHI 0.351, on a world map of supplier flows](docs/media/hero.webp)](https://atlasofdoubt.francecentral.cloudapp.azure.com)
 
