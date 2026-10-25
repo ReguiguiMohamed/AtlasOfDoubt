@@ -69,7 +69,7 @@ function start(section) {
   section.append(html(`
     <div class="head">
       <h1>${t("Choose a country")}</h1>
-      <p class="lede">${t("Every page reads the trade of one country: who supplies its imports, where its exports go, and which sea routes carry them. Pick the country to start, and change it at any time from the header.")}</p>
+      <p class="lede">${t("Every page reads the trade of one country: who supplies its imports, where its exports go, how the two balance with each partner, and which sea routes carry them. Pick the country to start, and change it at any time from the header.")}</p>
     </div>
     <div class="panel"><div id="countries"></div></div>`));
   countryPicker(section.querySelector("#countries"), reporters(), (c) => {
