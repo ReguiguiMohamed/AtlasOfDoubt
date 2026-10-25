@@ -8,7 +8,7 @@ The Python package. `python -m atlas.prepare` turns a BACI release into a snapsh
 | --- | --- | --- |
 | [`prepare.py`](prepare.py) | once per release | checks the 13 yearly files in DuckDB, writes Parquet, world and country-year aggregates, GeoDist pairs, tariffs, HS names, the graph and the twins |
 | [`materialize.py`](materialize.py) | first visit to a country | builds its import and export view from its Parquet partition into MongoDB |
-| [`metrics.py`](metrics.py) | everywhere | totals, shares, top-3 share, HHI, RCA, unit values, PRODY, EXPY and the scenario |
+| [`metrics.py`](metrics.py) | everywhere | totals, shares, top-3 share, HHI, RCA, unit values, PRODY, EXPY, trade balance, Grubel-Lloyd, Lafay and the scenario |
 | [`api.py`](api.py) | server | read endpoints scoped by `snapshot` and `reporter`, scenarios, reports, CSV, the static mount |
 | [`graph.py`](graph.py) | preparation, product page | the Ladybug trade graph and its Cypher queries |
 | [`twins.py`](twins.py) | preparation, imports and exports | the Milvus Lite basket vectors and their ranking |
@@ -92,6 +92,21 @@ The twin score is the inner product of two vectors, the Bhattacharyya coefficien
 - Only `metrics.py` does arithmetic, so a preview and the report saved from it come from the same function.
 - Values stay `Decimal` from the CSV text to the API, and the CSV export writes exact decimal text.
 - Reports carry `CALCULATION_VERSION`.
+
+## Trade balance
+
+`/api/balance?snapshot&reporter&year` sets the reporter's exports against its imports. Each exporter's `destinations` entry for the reporter in `country_years` is the reporter's import from it, so one MongoDB aggregation over about 230 documents gives both sides of every partner. BACI reconciles each flow into one value, so there is no mirror gap to report ([CEPII](https://www.cepii.fr/cepii/en/bdd_modele/presentation.asp?id=37)).
+
+| Metric | Formula | Level | Source |
+| --- | --- | --- | --- |
+| Balance | X − M | year, partner, section | |
+| Normalized balance | (X − M) / (X + M), from −1 to 1 | year, partner, section | |
+| Coverage ratio | X / M | year, partner, section | |
+| Grubel-Lloyd | 1 − Σ\|x − m\| / Σ(x + m) over HS6 products | year, section | [Grubel–Lloyd index](https://en.wikipedia.org/wiki/Grubel%E2%80%93Lloyd_index), [tradeIndices](https://cran.r-universe.dev/tradeIndices/doc/manual.html) |
+| Lafay | 100 · [(x − m) − (X − M)/(X + M) · (x + m)] / (X + M), adds to zero | HS section | [Erlat and Erlat](https://mail.meea.sites.luc.edu/volume10/PDFS/Paper%20by%20Erlat%20and%20Erlat.pdf), [CEPII CHELEM](https://www.cepii.fr/ANGLAISGRAPH/bdd/chelem/indicators/indicspeit.htm) |
+| Trade intensity | (x_ij / X_i) / (M_j / X_w), with M_j the partner's world imports | partner | [WITS](https://wits.worldbank.org/WITS/WITS/TradeIndicatorsHelp/TradeOutcomes_Help.htm) |
+
+Grubel-Lloyd sums numerators and denominators over products, so a small product weighs by its trade and not like a large one. Sections need the country's view, while the yearly trend and the partners read only `country_years`. Trade complementarity is left out because it needs every partner's imports by product, which only the reporter's own view holds.
 
 ## Country views
 

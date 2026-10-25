@@ -703,3 +703,28 @@ def test_search_puts_a_named_heading_before_its_products(named):
     assert search("cereal") == ["10"]
     assert search("fertil") == ["31", "3102", "310230"]
     assert search("live")[:2] == ["0101", "01"]
+
+
+# In TWO_REPORTERS Tunisia sells the USA 60 and buys 10 back and 30 from China, the USA buys 40 from China, and China buys nothing.
+BALANCES = {TUNISIA: (60000, 40000, {USA: (60000, 10000), CHINA: (0, 30000)}),
+            USA: (10000, 100000, {TUNISIA: (10000, 60000), CHINA: (0, 40000)}),
+            CHINA: (70000, 0, {TUNISIA: (30000, 0), USA: (40000, 0)})}
+
+
+@pytest.mark.parametrize("reporter", BALANCES)
+def test_balance_puts_each_partner_s_sales_against_its_purchases(two, reporter):
+    body = two.get("/api/balance", params={"reporter": reporter}).json()
+    exports, imports, partners = BALANCES[reporter]
+    assert (body["overall"]["exportsUsd"], body["overall"]["importsUsd"], body["overall"]["balanceUsd"]) == (exports, imports, exports - imports)
+    assert body["years"][0] == {"year": 2012, **{k: v for k, v in body["overall"].items() if k != "grubelLloyd"}}
+    assert body["years"][1] == {"year": 2013, "exportsUsd": None}
+    assert {p["countryCode"]: (p["exportsUsd"], p["importsUsd"]) for p in body["partners"]} == partners
+    [section] = body["sections"]
+    assert (section["exportsUsd"], section["importsUsd"], section["lafay"]) == (exports, imports, 0)
+    assert section["grubelLloyd"] == body["overall"]["grubelLloyd"] == pytest.approx(1 - abs(exports - imports) / (exports + imports))
+
+
+def test_balance_intensity_compares_a_partner_s_share_with_its_world_weight(two):
+    [usa] = [p for p in two.get("/api/balance", params={"reporter": TUNISIA}).json()["partners"] if p["countryCode"] == USA]
+    # Tunisia sends all 60 of its exports to the USA, which takes 100 of the 140 the world exports.
+    assert usa["intensity"] == pytest.approx(1 / (100 / 140))

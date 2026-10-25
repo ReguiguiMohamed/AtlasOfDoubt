@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from atlas.metrics import disruption, merge, summarize, with_shares
+from atlas.metrics import balance, disruption, grubel_lloyd, lafay, merge, summarize, with_shares
 
 
 def supplier(code, value):
@@ -105,3 +105,26 @@ def test_group_recomputes_shares_from_summed_values():
     assert group["hhi"] == Decimal("0.91") ** 2 + Decimal("0.09") ** 2
     averaged = (summarize(wheat)["hhi"] + summarize(barley)["hhi"]) / 2
     assert group["hhi"] != averaged
+
+
+def test_balance_of_a_deficit():
+    result = balance(Decimal(30), Decimal(70))
+    assert result["balanceUsd"] == -40
+    assert result["normalized"] == Decimal("-0.4")
+    assert result["coverage"] == Decimal(3) / 7
+    assert balance(Decimal(5), Decimal(0))["coverage"] is None
+    assert balance(Decimal(0), Decimal(0))["normalized"] is None
+
+
+def test_grubel_lloyd_runs_from_one_way_to_matched_trade():
+    assert grubel_lloyd([(Decimal(10), Decimal(0)), (Decimal(0), Decimal(5))]) == 0
+    assert grubel_lloyd([(Decimal(10), Decimal(10)), (Decimal(3), Decimal(3))]) == 1
+    assert grubel_lloyd([(Decimal(90), Decimal(10)), (Decimal(1), Decimal(1))]) == 1 - Decimal(80) / 102
+    assert grubel_lloyd([]) is None
+
+
+def test_lafay_indices_add_to_zero_and_mark_the_surplus_group():
+    index = lafay({"fuel": (Decimal(5), Decimal(80)), "cars": (Decimal(60), Decimal(10)), "food": (Decimal(20), Decimal(25))})
+    assert abs(sum(index.values())) < Decimal("1e-20")
+    assert index["cars"] > 0 > index["fuel"]
+    assert lafay({"none": (Decimal(0), Decimal(0))}) == {"none": None}

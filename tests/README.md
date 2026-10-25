@@ -1,6 +1,6 @@
 # tests
 
-`pytest -q` runs 116 tests against MongoDB on port 27017, in a database of its own, `atlas_test`, dropped before each test. CI starts a MongoDB 9.0 service for them.
+`pytest -q` runs 123 tests against MongoDB on port 27017, in a database of its own, `atlas_test`, dropped before each test. CI starts a MongoDB 9.0 service for them.
 
 ```bash
 pytest -q
@@ -59,4 +59,6 @@ node --test tests/frontend.test.mjs
 | A market charges the reporter its best preference, a customs union charges nothing, a group with no known members is never applied, and the reporter's own schedule names the suppliers it favours | `test_api.py::test_a_market_charges_the_reporter_its_best_preference_and_a_customs_union_nothing` |
 | A product's world exporters leave the reporter out and keep their share of world exports | `test_api.py::test_history_lists_world_exporters_without_the_reporter` |
 | Country names CEPII encoded twice are repaired, clean names stay | `test_prepare.py::test_names_encoded_twice_are_repaired_and_clean_names_kept` |
+| A partner's imports are its own sales to the reporter, the yearly balance is exports minus imports, and trade intensity weighs a partner's share by its share of world imports | `test_api.py::test_balance_puts_each_partner_s_sales_against_its_purchases`, `::test_balance_intensity_compares_a_partner_s_share_with_its_world_weight` |
+| Lafay indices add to zero and mark the surplus section, Grubel-Lloyd runs from 0 for one-way trade to 1 for matched trade | `test_metrics.py::test_lafay_indices_add_to_zero_and_mark_the_surplus_group`, `::test_grubel_lloyd_runs_from_one_way_to_matched_trade`, `::test_balance_of_a_deficit` |
 | Route and chokepoint totals are sums of their countries, and routes follow the reporter | `test_api.py::test_routes_sum_countries_into_routes_and_chokepoints`, `::test_routes_follow_the_reporter`, `::test_the_route_depends_on_the_reporter` |
