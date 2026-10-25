@@ -74,6 +74,7 @@ def main():
             f"/categories?{q()}",
             f"/movers?{q(to=latest, minValue=MIN_VALUE, **{'from': years[0]})}",
             f"/exports?{q(minValue=MIN_VALUE)}",
+            f"/balance?{q()}",
             f"/routes?{q()}",
             f"/twins?{q(flow='imports')}",
             f"/twins?{q(flow='exports')}",
