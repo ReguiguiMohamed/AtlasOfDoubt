@@ -33,6 +33,16 @@ The web app. Plain ES modules with a hash router, ECharts 5.6.0 and Tabulator 6.
 - Export twins on a map and in bars.
 - Products arrive without their destinations, 0.6 MB gzipped for the USA, and a product's destinations load when it is opened.
 
+## Balance
+
+`#/balance?year`
+
+- Balance, coverage ratio, normalized balance, Grubel-Lloyd index, and the largest surplus and deficit partners.
+- A world map of the normalized balance with each partner, red for a deficit and green for a surplus.
+- Exports up, imports down and the balance line from 2012 to 2024.
+- The Lafay index by HS section, with each section's balance and Grubel-Lloyd index on hover.
+- Each partner's exports, imports, balance, coverage and trade intensity.
+
 ## Product
 
 `#/product/{code}?year` for a product, heading or chapter.
@@ -78,7 +88,7 @@ The web app. Plain ES modules with a hash router, ECharts 5.6.0 and Tabulator 6.
 ## Behaviour
 
 - The reporter sits in `?reporter=`, so a shared link opens on the same country.
-- A snapshot's answers never change, so the browser keeps the last 40 in memory and preloads imports, exports, routes and twins. On Japan the next click sent no request and drew in 0.6 to 0.9 s.
+- A snapshot's answers never change, so the browser keeps the last 40 in memory and preloads imports, exports, balance, routes and twins. On Japan the next click sent no request and drew in 0.6 to 0.9 s.
 - Maps zoom with the wheel, a pinch or the + and − buttons, and Whole world resets them. Boundaries are Natural Earth 1:50m from world-atlas 2.0.2.
 - Charts zoom with Ctrl and the wheel or a drawn box, and reset on a double-click. Save image downloads a PNG.
 - Each view renders into a fresh section, so a slow request from a page already left never writes into the current one.

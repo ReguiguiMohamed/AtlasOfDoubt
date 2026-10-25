@@ -2,13 +2,14 @@ import { lang, switchLang, t } from "./i18n.js";
 import { api, countryPicker, disposeCharts, esc, html, preload, scoped, snapshotDetail, state } from "./lib.js";
 import overview from "./views/overview.js";
 import exports from "./views/exports.js";
+import balance from "./views/balance.js";
 import country from "./views/country.js";
 import product from "./views/product.js";
 import reports from "./views/reports.js";
 import seaRoutes from "./views/routes.js";
 import scenario from "./views/scenario.js";
 
-const routes = { overview, exports, product, country, routes: seaRoutes, scenario, reports };
+const routes = { overview, exports, balance, product, country, routes: seaRoutes, scenario, reports };
 const main = document.getElementById("view");
 const picker = document.getElementById("snapshot");
 const reporterPicker = document.getElementById("reporter");
@@ -121,7 +122,7 @@ async function render() {
     // The same requests the main pages make when opened without a year, so their first click is already warm.
     if (state.reporter) {
       const twins = state.snapshot.twins ? ["imports", "exports"].map((flow) => `/twins?${scoped({ flow })}`) : [];
-      preload([`/overview?${scoped({ minValue: 1_000_000 })}`, `/exports?${scoped({ minValue: 1_000_000 })}`, `/routes?${scoped()}`, ...twins]);
+      preload([`/overview?${scoped({ minValue: 1_000_000 })}`, `/exports?${scoped({ minValue: 1_000_000 })}`, `/balance?${scoped()}`, `/routes?${scoped()}`, ...twins]);
     }
   } catch (error) {
     section.innerHTML = `<p class="error">${esc(error.message)}</p>`;
